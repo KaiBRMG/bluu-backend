@@ -11,8 +11,8 @@ import { getOnlyMonsterStatus } from '@/lib/services/onlymonsterSyncService';
  * Any signed-in employee: it says *when* data was synced, never what it is.
  * Projected to the label's four fields (rule 9i) — the per-stage errors stay
  * on the admin mapping route. Browser-cached 60 s (`private` + `Vary:
- * Authorization`): the data changes three times a day, and there is no refresh
- * to wait on (D10).
+ * Authorization`): the data changes three times a day. After a refresh (D26)
+ * `SyncFreshness` re-reads it with `cache: 'no-store'`.
  */
 export const GET = withAuth(async () => {
   try {

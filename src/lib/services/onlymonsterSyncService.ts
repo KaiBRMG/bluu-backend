@@ -371,6 +371,41 @@ export async function runOnlyMonsterSync(params: { trigger: 'cron' | 'continue' 
   };
 }
 
+// ─── Manual refresh ──────────────────────────────────────────────────
+
+/** A refresh within this long of the last pay derivation answers "already up to date" without an API call. */
+export const REFRESH_COOLDOWN_MS = 2 * 60_000;
+
+export type OnlyMonsterRefreshOutcome =
+  | { status: 'fresh'; syncedAt: string }
+  | { status: 'running' }
+  | { status: 'not-configured' }
+  | { status: 'ran'; result: OnlyMonsterRunResult };
+
+/**
+ * The refresh button on CA Admin → Sales and the agent's Sales Report: a full
+ * scheduled-style run (every stage but the daily reconcile/balances), so new
+ * transactions reach `ca-sales` and every salary — derived on read — follows.
+ *
+ * Reverses D10 (no refresh) on the user's instruction (2026-11-13). Three
+ * guards keep it from becoming a poll: the run's own lease (a refresh never
+ * overlaps the cron or another refresh — `running`), a cooldown from the last
+ * successful pay derivation (`fresh`, one document read), and the client's
+ * rate limiter inside the run. A run that runs out of time leaves its stages
+ * pending for the ten-minute continuation, exactly like a cron run.
+ */
+export async function refreshOnlyMonster(uid: string): Promise<OnlyMonsterRefreshOutcome> {
+  if (!isOnlyMonsterConfigured()) return { status: 'not-configured' };
+  const state = (await adminDb.doc(STATE_DOC).get()).data() as OnlyMonsterStateDocument | undefined;
+  const lastDerive = state?.stages?.derive?.lastSuccessAt?.toMillis?.() ?? null;
+  if (lastDerive !== null && Date.now() - lastDerive < REFRESH_COOLDOWN_MS) {
+    return { status: 'fresh', syncedAt: new Date(lastDerive).toISOString() };
+  }
+  const outcome = await runOnlyMonsterSync({ trigger: `manual:${uid}` });
+  if (outcome.status === 'skipped') return { status: outcome.reason === 'running' ? 'running' : 'not-configured' };
+  return outcome;
+}
+
 // ─── Read side ───────────────────────────────────────────────────────
 
 export interface OnlyMonsterStatus {

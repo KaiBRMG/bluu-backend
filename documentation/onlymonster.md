@@ -140,7 +140,7 @@ All three read OnlyMonster's collections and the BuddyX archive (`ofAnalyticsSer
 - **The sales board never shows OnlyMonster's per-member revenue** (rule 9k): those rows are dropped from its unlinked list.
 - **D13 cross-check:** the admin-only report shows *"OnlyMonster attributes $X"* under Sales, with *(check the schedule)* past 15% and $50. It is never pay.
 - **Fan Analytics:** `creator-fans` (every category; `spendByMonth[month].{tips,ppv,subs,other,…}`); subscribers from `of-subscription-days`. Admin scope and the dispute picker use `mappedCreatorIds()` (`onlymonsterMappingService.ts`, via `/api/onlymonster/creators`).
-- **Page headers** show `SyncFreshness` → `DataFreshness` ("Updated 13:01 · next 21:01") from `GET /api/onlymonster/status`. There is no refresh button (D10).
+- **Page headers** show `SyncFreshness` → `DataFreshness` ("Updated 13:01 · next 21:01") from `GET /api/onlymonster/status`. **CA Admin → Sales and the Sales Report** (agent dashboard and CA Admin → Salaries) also carry a **refresh** (D26, reversing D10's no-refresh rule): `POST /api/onlymonster/refresh` (`ca-dashboard` or `ca-admin`) runs the full sync now via `refreshOnlyMonster` (`trigger: manual:{uid}`; ~1 min), then the page clears its sales/salary session caches and reloads, and salaries follow because they are derived on read. Guards: the run's lease (`409` while the cron or another refresh runs), a 2-minute cooldown from the last successful `derive` stage (`fresh`, no API call), and the client's rate limiter. Every other page header stays passive.
 
 ## Switches
 
@@ -153,7 +153,7 @@ All three read OnlyMonster's collections and the BuddyX archive (`ofAnalyticsSer
 ## Admin views (CA Admin → Sales)
 
 - **OnlyMonster mapping:** mapping, freshness, the backfill's progress, the reconciliation per account-month (✓, or the difference), and payout balances (admin claim).
-- **Shadow reconciliation:** paid vs OnlyFans per account-day; agent-days; the strict rule's impact per agent; unassigned totals by reason; chargebacks; accounts BuddyX pays that OnlyMonster doesn't cover; and, once the cutover is set, the boundary check (rows on the wrong side must be zero).
+- **Shadow reconciliation:** removed 2026-11-13 once pay writes went live — it compared BuddyX's pay with the shadow ledger, and BuddyX is gone. `ca-sales-shadow` rows from before the switch expire by TTL.
 
 ## Scripts
 
@@ -170,7 +170,7 @@ All three read OnlyMonster's collections and the BuddyX archive (`ofAnalyticsSer
 |---|---|
 | Phase 1 gate | Deploy and the key; three clean scheduled runs. |
 | Phase 2 sign-off | The backfill completes, and 7 days of the nightly reconciliation are clean or explained. (The analytics already read OnlyMonster.) |
-| Phase 4: switch `salesWriteEnabled` on (the cutover is set, D25) | A review of 6 Nov onward in the Shadow reconciliation after the first deployed runs, and a fresh invariant-6 backup. V4 id stability (snapshot compare ≥ 2026-11-17) is still checked afterwards. |
+| Phase 4: switch `salesWriteEnabled` on (the cutover is set, D25) | **Done 2026-11-13** on the user's instruction. |
 | `FAN_REGISTRY` → `fans` | `scripts/migrate-fan-registry.js` run and verified. |
 | Phase 6 remainder | **Code removed 2026-11-13** (ahead of the original precondition, on the user's instruction: the team had stopped using BuddyX). Left: remove `BUDDYX_API_KEY` and revoke it; delete the compatibility stubs after 2026-11-30; export and delete the archived `buddyx-*` collections only on the user's go-ahead, readers first ([buddyx.md §8](buddyx.md#8-collections-archive)). |
 | Phase 7 sending (mass messages, campaigns) | Not built. It needs a separate key and separate approval (§12). |

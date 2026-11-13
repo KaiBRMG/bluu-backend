@@ -121,6 +121,8 @@ interface SalesReportProps {
   /** Payroll only — lets an admin remove an Infloww history row. */
   allowDelete?: boolean;
   onDeleted?: () => void;
+  /** After the header's OnlyMonster refresh: the page reloads what sits beside this report (the salary month). */
+  onRefreshed?: () => void;
 }
 
 const kindChartConfig = {
@@ -144,6 +146,7 @@ export function SalesReport({
   onSelectDay,
   allowDelete = false,
   onDeleted,
+  onRefreshed,
 }: SalesReportProps) {
   const { user } = useAuth();
   const [data, setData] = useState<SalesReportResponse | null>(null);
@@ -277,7 +280,12 @@ export function SalesReport({
         <div className="flex items-center gap-2">
           {data.finalized && <AttrChip>Finalised — figures frozen</AttrChip>}
         </div>
-        <SyncFreshness />
+        <SyncFreshness
+          onRefreshed={() => {
+            void load(true);
+            onRefreshed?.();
+          }}
+        />
       </div>
 
       {/* ── KPI row ── */}

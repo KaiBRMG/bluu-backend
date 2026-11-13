@@ -22,7 +22,7 @@ import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { useUserData } from '@/hooks/useUserData';
 import { activeChatAgents, useBasicUsers } from '@/hooks/useBasicUsers';
 import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
-import { addDays, addMonths, currentDayKey, currentMonthKey, enumerateDays, formatDayLabel, formatMonthName } from '@/lib/salary/salaryDate';
+import { addDays, addMonths, currentDayKey, enumerateDays, formatDayLabel, formatMonthName } from '@/lib/salary/salaryDate';
 import { SyncFreshness } from '@/components/onlymonster/SyncFreshness';
 import { PeriodPicker, dayKeyToDate } from '@/components/analytics/PeriodPicker';
 import { CreatorCombobox } from '@/components/analytics/CreatorCombobox';
@@ -48,7 +48,6 @@ import { disputeStage, formatMoney, OUTCOME_LABEL, outcomePillClass, verdictToas
 import { DisputeMovesFeed } from './DisputeMovesFeed';
 import { OnlyMonsterMappingSection } from './OnlyMonsterMappingSection';
 import { statusClassOf } from '@/lib/onlymonster/classify';
-import { ShadowReconciliationSection } from './ShadowReconciliationSection';
 
 /**
  * CA Admin → Sales — every sale in a period, for the whole roster, newest
@@ -125,6 +124,9 @@ interface Focus {
   ids: Set<string>;
 }
 
+/** A row's source, as the ledger names it (BuddyX rows are frozen history). */
+const SOURCE_NAME = { infloww: 'Infloww', buddyx: 'BuddyX', onlymonster: 'OnlyMonster' } as const;
+
 type KindFilter = 'all' | 'tip' | 'ppv';
 export type SalesView = 'all' | 'unassigned' | 'off-schedule' | 'differs' | 'disputed' | 'removed';
 type OutcomeFilter = SaleDisputeOutcome | 'all';
@@ -134,7 +136,7 @@ const VIEWS: Array<{ value: SalesView; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'unassigned', label: 'Unassigned' },
   { value: 'off-schedule', label: 'Off schedule' },
-  { value: 'differs', label: 'Differs from BuddyX' },
+  { value: 'differs', label: 'Differs from source' },
   { value: 'disputed', label: 'Disputed' },
   { value: 'removed', label: 'Removed' },
 ];
@@ -156,7 +158,7 @@ function inView(
     case 'off-schedule':
       return schedule[s.saleId]?.differs === true;
     case 'differs':
-      // Moved by a dispute or an admin, or credited to the agent on shift rather than BuddyX's chatter.
+      // Moved by a dispute or an admin, or (BuddyX era) credited to the agent on shift rather than BuddyX's chatter.
       // OnlyMonster rows have no platform credit to differ from: only a move counts.
       return !s.removedAt && (!s.matchesSource || Boolean(s.transfer) || (s.source !== 'onlymonster' && s.buddyxUserId !== s.userId));
     case 'disputed':
@@ -582,8 +584,8 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
     if (data.flags.attributionConflicts.length > 0) {
       lines.push({
         key: 'conflicts',
-        text: `${pluralise(data.flags.attributionConflicts.length, 'moved sale')} BuddyX has since credited to someone else — Bluu's assignment stands`,
-        action: { label: 'Show them', run: () => showRows('BuddyX changed since the move', data.flags.attributionConflicts) },
+        text: `${pluralise(data.flags.attributionConflicts.length, 'moved sale')} the source has since credited to someone else — Bluu's assignment stands`,
+        action: { label: 'Show them', run: () => showRows('Source changed since the move', data.flags.attributionConflicts) },
       });
     }
     if (data.flags.staleLocks.length > 0) {
@@ -704,7 +706,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
               setCustomTo(nextTo);
             }}
           />
-          <SyncFreshness />
+          <SyncFreshness onRefreshed={() => void load(true)} />
         </div>
       </div>
 
@@ -998,7 +1000,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                             <span className="flex flex-wrap items-center gap-1.5">
                               <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
                               {(data.spansCutover || sale.source === 'onlymonster') && (
-                                <AttrChip>{sale.source === 'onlymonster' ? 'OnlyMonster' : sale.source === 'buddyx' ? 'BuddyX' : 'Infloww'}</AttrChip>
+                                <AttrChip>{SOURCE_NAME[sale.source]}</AttrChip>
                               )}
                               {sale.status === 'reverse' && <span className="text-[11px] text-red-400">Reversed</span>}
                               {sale.disputeId && !showDisputeColumn && (
@@ -1011,7 +1013,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                               {sale.vanishedAfterFinalise && <span className="text-[11px] text-orange-400">Gone from BuddyX after finalising</span>}
                               {sale.removedAt && (
                                 <span className="text-[11px] text-zinc-400">
-                                  Removed {formatSaleDateTime(sale.removedAt, timezone)} — no longer in BuddyX
+                                  Removed {formatSaleDateTime(sale.removedAt, timezone)} — no longer in {SOURCE_NAME[sale.source]}
                                 </span>
                               )}
                             </span>
@@ -1102,14 +1104,10 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
       />
 
       {/* ── Machinery, collapsed ── */}
-      {/* BuddyX → OnlyMonster migration, Phase 1: identity only, no pay impact.
+      {/* Which OnlyFans account and member is which Bluu creator and agent.
           Its content mounts (and fetches) only when opened. */}
       <Section title="OnlyMonster mapping">
         <OnlyMonsterMappingSection isAdmin={isAdmin} authed={authed} timezone={timezone} />
-      </Section>
-      {/* Phase 3: what OnlyMonster would pay beside what BuddyX pays. Never pay. */}
-      <Section title="Shadow reconciliation (OnlyMonster)">
-        <ShadowReconciliationSection authed={authed} month={currentMonthKey()} />
       </Section>
     </div>
   );
@@ -1169,7 +1167,7 @@ const LEDGER_COLUMNS: Array<{ label: string; right?: boolean; hint?: string; bas
   { label: 'Creator' },
   { label: 'Held by' },
   { label: 'On shift', hint: 'Who the shift schedule had on this account at the time of sale' },
-  { label: 'Source credits', hint: 'Who the source platform credits. BuddyX rows only (historical); OnlyMonster reports no per-sale chatter.' },
+  { label: 'Source credits', hint: 'Who BuddyX credited, on its (frozen, pre-6 Nov) rows. OnlyMonster reports no per-sale chatter, so its rows leave this empty.' },
   { label: 'Type' },
   { label: 'Fan' },
   { label: 'Gross', right: true, basis: 'gross' },
@@ -1413,7 +1411,7 @@ function ReassignSaleDialog({
             ? 'Clears the override — the sale goes back to the agent on shift.'
             : sale.attributedBy === 'departed'
               ? 'Clears the override — the sale goes back to unassigned.'
-              : 'Clears the override — the sale matches BuddyX again.'),
+              : `Clears the override — the sale matches ${SOURCE_NAME[sale.source]} again.`),
         sale.userId ? `${nameOf(sale.userId)} loses ${gross} gross.` : `${gross} gross, unassigned until now.`,
         toUserId ? `${nameOf(toUserId)} gains it.` : 'It will count toward nobody.',
         `Both agents’ ${sale.month} figures recompute.`,
@@ -1423,7 +1421,7 @@ function ReassignSaleDialog({
   const tags = (uid: string) =>
     [
       onShift.includes(uid) && 'on shift',
-      uid === sale.buddyxUserId && 'matches BuddyX',
+      uid === sale.buddyxUserId && `matches ${SOURCE_NAME[sale.source]}`,
       uid === sale.sourceUserId && sale.attributedBy === 'schedule' && 'assigned by shift',
     ]
       .filter(Boolean)
@@ -1442,7 +1440,7 @@ function ReassignSaleDialog({
         method: 'PUT',
         body: JSON.stringify({ toUserId, reason: reason.trim() }),
       });
-      toast.success(backToBuddyx ? (sale.attributedBy === 'schedule' ? 'Sale back with the agent on shift' : 'Sale back on BuddyX’s attribution') : `Sale ${sale.userId ? 'reassigned' : 'assigned'} to ${nameOf(toUserId)}`);
+      toast.success(backToBuddyx ? (sale.attributedBy === 'schedule' ? 'Sale back with the agent on shift' : `Sale back on ${SOURCE_NAME[sale.source]}’s attribution`) : `Sale ${sale.userId ? 'reassigned' : 'assigned'} to ${nameOf(toUserId)}`);
       await onDone();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not reassign the sale';
@@ -1489,7 +1487,7 @@ function ReassignSaleDialog({
           </dd>
           {sale.source !== 'onlymonster' && (
             <>
-              <dt className="text-zinc-400">BuddyX credits</dt>
+              <dt className="text-zinc-400">{SOURCE_NAME[sale.source]} credits</dt>
               <dd>{buddyxCreditName(sale, allNames)}</dd>
             </>
           )}
@@ -1517,7 +1515,7 @@ function ReassignSaleDialog({
               {pinned.size > 0 && <SelectSeparator />}
               {agents.filter(u => !pinned.has(u.uid)).map(u => <SelectItem key={u.uid} value={u.uid}>{u.displayName}</SelectItem>)}
               <SelectItem value={NOBODY}>
-                Nobody (unassigned){sale.sourceUserId === null && sale.attributedBy !== 'departed' ? ' — matches BuddyX' : ''}
+                Nobody (unassigned){sale.sourceUserId === null && sale.attributedBy !== 'departed' ? ` — matches ${SOURCE_NAME[sale.source]}` : ''}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -1534,7 +1532,7 @@ function ReassignSaleDialog({
             maxLength={500}
             rows={2}
             onChange={e => { setReason(e.target.value); setError(null); }}
-            placeholder="Queen was on shift with this fan; BuddyX credited the sender's account."
+            placeholder="Queen was on shift with this fan; the sale was credited to the sender."
           />
         </div>
 

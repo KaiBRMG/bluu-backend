@@ -196,6 +196,7 @@ function SalaryPageContent() {
                 day={inspectedDay}
                 onClearDay={() => setInspectedDay(null)}
                 onSelectDay={setInspectedDay}
+                onRefreshed={() => void refetch()}
               />
             </TabsContent>
           </Tabs>

@@ -747,6 +747,7 @@ function AgentDetail({
                 onSelectDay={setInspectedDay}
                 allowDelete={data.status !== 'finalized'}
                 onDeleted={refetch}
+                onRefreshed={() => void refetch()}
               />
             </TabsContent>
           </Tabs>

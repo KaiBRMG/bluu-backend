@@ -54,6 +54,7 @@ Online time is removed entirely, including the `never-online` integrity flag and
 | D22 (P4) | Cross-check threshold | **15% and $50**, display only. OnlyMonster attributes only ~74% of PPV, so the badge reads "OnlyMonster attributes $X" and never "differs". |
 | D23 (P5) | Cutover instant | **A 00:00 SAST boundary**, consistent with D18. |
 | D25 | **Cutover instant** (supersedes D23) | **2026-11-06 01:00 SAST** (`2026-11-05T23:00:00Z`), set by the user on 2026-11-11. It is in the past: BuddyX's last sale is 2026-11-05 21:09 SAST, and no `bx-*` row exists after the instant (checked 2026-11-11), so nothing is owned twice. Agents' tips and PPV from 6 Nov have been missing from pay since then; OnlyMonster's rows fill them once `salesWriteEnabled` is on. The Phase 3 shadow gate is shortened to a review of those days in the Shadow reconciliation before the switch. |
+| D26 | **Manual refresh** (2026-11-13, reverses D10's no-refresh rule for the sales pages only) | A refresh button on CA Admin → Sales and the Sales Report runs the full sync now (`POST /api/onlymonster/refresh`, `ca-dashboard`/`ca-admin`), guarded by the run's lease and a 2-minute cooldown. The scheduled cadence is unchanged; every other surface stays passive. |
 | D24 | Chatter Analytics activity, 27 Sep – 31 Oct 2026 | Claude's call: **keep BuddyX's activity days**, copied into `chatter-days` labelled "BuddyX (historical)" before `buddyx-team-days` is archived. Deleting them would blank five weeks for no gain. |
 
 **Proposed by the plan (superseded by the table above, kept for the record):**

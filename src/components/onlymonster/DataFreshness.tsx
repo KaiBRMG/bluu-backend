@@ -5,9 +5,9 @@ import { safeTimezone } from '@/lib/utils/timezone';
 
 /**
  * "Updated 13:01 · next 21:01". A passive label for data the OnlyMonster sync
- * writes three times a day (migration plan §5.8). **There is no refresh
- * button**: clients read Firestore only, and every refresh path into the API was
- * removed on purpose (D10).
+ * writes three times a day (migration plan §5.8). Passive: clients read
+ * Firestore only. The one refresh (the two sales pages, D26) lives in
+ * `SyncFreshness`, which wraps this label.
  *
  * - Failed last run → status-orange, and it says what is on screen instead:
  *   "Last sync failed · showing data from 13:01". Stale is not empty.
