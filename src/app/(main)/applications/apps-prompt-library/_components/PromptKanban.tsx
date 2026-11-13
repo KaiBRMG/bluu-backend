@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
+import { ShieldCheck, Users } from 'lucide-react';
+import { useAuth } from '@/components/AuthProvider';
 import type { PromptDocument } from '@/types/promptLibrary';
 import { LlmMarks } from './LlmMark';
 import { relativeTime } from '../_lib/format';
@@ -26,6 +28,8 @@ export function PromptKanban({
   prompts: PromptDocument[];
   onOpen: (id: string) => void;
 }) {
+  const { user } = useAuth();
+  const myUid = user?.uid ?? '';
   const columns = useMemo<Column[]>(() => {
     const groups = new Map<string, PromptDocument[]>();
     for (const p of prompts) {
@@ -83,7 +87,7 @@ export function PromptKanban({
           <ul className="flex flex-col gap-1.5">
             {column.items.map(prompt => (
               <li key={prompt.id}>
-                <PromptCard prompt={prompt} onOpen={onOpen} />
+                <PromptCard prompt={prompt} onOpen={onOpen} myUid={myUid} />
               </li>
             ))}
           </ul>
@@ -93,13 +97,30 @@ export function PromptKanban({
   );
 }
 
+/**
+ * How a prompt reached this person, when they did not write it. Said from what
+ * the caller is allowed to know: a viewer is never told who else holds a grant,
+ * so this reads their own role and nothing about the grant behind it.
+ */
+function provenance(prompt: PromptDocument, myUid: string): { label: string; admin: boolean } | null {
+  if (prompt.viaAdmin) return { label: 'Admin access — not shared with you', admin: true };
+  if (prompt.createdBy === myUid) return null;
+  return {
+    label: prompt.myRole === 'edit' ? 'Shared with you · can edit' : 'Shared with you · view only',
+    admin: false,
+  };
+}
+
 function PromptCard({
   prompt,
   onOpen,
+  myUid,
 }: {
   prompt: PromptDocument;
   onOpen: (id: string) => void;
+  myUid: string;
 }) {
+  const origin = provenance(prompt, myUid);
   return (
     <button
       type="button"
@@ -112,6 +133,16 @@ function PromptCard({
 
       <span className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-400">
+          {origin && (
+            <span title={origin.label} className="flex shrink-0 items-center">
+              {origin.admin ? (
+                <ShieldCheck className="size-3" aria-hidden />
+              ) : (
+                <Users className="size-3" aria-hidden />
+              )}
+              <span className="sr-only">{origin.label}</span>
+            </span>
+          )}
           <span className="tabular-nums">v{prompt.version}</span>
           <span aria-hidden>·</span>
           <span className="truncate">{relativeTime(prompt.lastUpdatedTime)}</span>

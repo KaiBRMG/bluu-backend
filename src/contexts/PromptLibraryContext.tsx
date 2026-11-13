@@ -14,23 +14,32 @@ import { apiRequest } from '@/lib/clientApi';
 import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
 import {
   EMPTY_TAXONOMY,
+  EMPTY_VIEWER,
   mergeModels,
+  type PromptAccess,
+  type PromptAccessChange,
   type PromptCreateInput,
   type PromptDocument,
+  type PromptRole,
   type PromptMetaInput,
   type PromptModel,
   type PromptTaxonomy,
+  type PromptViewerInfo,
   type PromptVersion,
 } from '@/types/promptLibrary';
 
-// Bumped from _v1: the cached shape gained `taxonomy.models`, `llmTypes` and
-// the rich-text body, and a stale v1 entry would render a modelless library.
-const CACHE_KEY = 'bluu_prompt_library_v2';
+// Bumped from _v2: the shape gained `access`, `myRole` and `viaAdmin`, and the
+// list is now filtered per person — a stale v2 entry would still hold prompts
+// that are no longer theirs.
+const CACHE_KEY = 'bluu_prompt_library_v3';
+const SHOW_ALL_KEY = 'bluu_prompt_library_show_all';
 const TTL = 5 * 60 * 1000;
 
 interface Snapshot {
   prompts: PromptDocument[];
   taxonomy: PromptTaxonomy;
+  /** Who the server says the caller is — never inferred on the client. */
+  viewer: PromptViewerInfo;
 }
 
 /** What a save carries beyond the text: the rich body and the author's note. */
@@ -50,7 +59,26 @@ export interface OverwriteVersionInput {
   version: number;
 }
 
+export type AccessChangeInput = PromptAccessChange;
+
 interface PromptLibraryValue extends Snapshot {
+  /**
+   * Everything the server sent, including the prompts Show-all is hiding.
+   * Lookups by id (the detail card, deep links) read THIS, not `prompts`: a link
+   * to a prompt an admin has not switched on must still open it.
+   */
+  allPrompts: PromptDocument[];
+  /**
+   * Admin-only. True when the caller is an admin, i.e. may reveal the prompts
+   * that are outside their own grants.
+   */
+  canShowAll: boolean;
+  /** Whether those admin-only prompts are currently mixed into `prompts`. */
+  showAll: boolean;
+  setShowAll: (on: boolean) => void;
+  /** How many prompts the switch would reveal — shown beside it. */
+  hiddenByAdminCount: number;
+
   loading: boolean;
   error: string | null;
   refresh: () => void;
@@ -82,6 +110,12 @@ interface PromptLibraryValue extends Snapshot {
   shareLink: (id: string) => Promise<string>;
   /** Withdraws the public link. A later re-share mints a NEW one. */
   revokeShare: (id: string) => Promise<void>;
+  /**
+   * Applies a delta to who the prompt is shared with. Patches state from the
+   * response — the library is never re-read. Resolves to what the caller holds
+   * NOW; `null` means they lost the prompt and it has left their board.
+   */
+  updateAccess: (id: string, change: AccessChangeInput) => Promise<PromptRole | null>;
 
   addLabels: (input: {
     categories?: string[];
@@ -115,7 +149,26 @@ async function readError(res: Response, fallback: string): Promise<never> {
  */
 export function PromptLibraryProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const [snapshot, setSnapshot] = useState<Snapshot>({ prompts: [], taxonomy: EMPTY_TAXONOMY });
+  const [showAll, setShowAllState] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem(SHOW_ALL_KEY) === '1';
+    } catch {
+      return false; // Storage blocked — the switch simply starts off.
+    }
+  });
+  const setShowAll = useCallback((on: boolean) => {
+    setShowAllState(on);
+    try {
+      localStorage.setItem(SHOW_ALL_KEY, on ? '1' : '0');
+    } catch {
+      // Not persisted; still applies for this session.
+    }
+  }, []);
+  const [snapshot, setSnapshot] = useState<Snapshot>({
+    prompts: [],
+    taxonomy: EMPTY_TAXONOMY,
+    viewer: EMPTY_VIEWER,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -154,6 +207,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
         const next: Snapshot = {
           prompts: body.prompts ?? [],
           taxonomy: body.taxonomy ?? EMPTY_TAXONOMY,
+          viewer: body.viewer ?? EMPTY_VIEWER,
         };
         setSnapshot(next);
         setCache(CACHE_KEY, next);
@@ -192,6 +246,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
 
       setSnapshot(prev => {
         const next: Snapshot = {
+          ...prev,
           prompts: [prompt, ...prev.prompts],
           taxonomy: {
             ...prev.taxonomy,
@@ -273,6 +328,7 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
 
     setSnapshot(prev => {
       const next: Snapshot = {
+        ...prev,
         prompts: prev.prompts.map(p => (p.id === id ? prompt : p)),
         taxonomy: {
           ...prev.taxonomy,
@@ -333,6 +389,37 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     [patchShareId]
   );
 
+  const updateAccess = useCallback(async (id: string, change: AccessChangeInput) => {
+    const res = await apiRequest(`/api/prompt-library/${id}/access`, {
+      method: 'PUT',
+      body: JSON.stringify(change),
+    });
+    if (!res.ok) await readError(res, 'Failed to update who can access this prompt');
+    const body = (await res.json()) as {
+      access: PromptAccess | null;
+      myRole: PromptRole | null;
+      viaAdmin: boolean;
+    };
+
+    setSnapshot(prev => {
+      const next: Snapshot = {
+        ...prev,
+        prompts:
+          body.myRole === null
+            ? prev.prompts.filter(p => p.id !== id)
+            : prev.prompts.map(p =>
+                p.id === id
+                  ? { ...p, access: body.access, myRole: body.myRole!, viaAdmin: body.viaAdmin }
+                  : p
+              ),
+      };
+      setCache(CACHE_KEY, next);
+      return next;
+    });
+    if (body.myRole === null) versionCache.current.delete(id);
+    return body.myRole;
+  }, []);
+
   const addLabels = useCallback(async (input: {
     categories?: string[];
     tags?: string[];
@@ -380,9 +467,29 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
     return map;
   }, [models]);
 
+  // An admin's everyday view is the prompts shared with them; the rest sit
+  // behind the switch. Every consumer reads `prompts`, so search, the model
+  // pages and the counts all agree on what "the library" currently is.
+  const canShowAll = snapshot.viewer.isAdmin;
+  const hiddenByAdminCount = useMemo(
+    () => snapshot.prompts.filter(p => p.viaAdmin).length,
+    [snapshot.prompts]
+  );
+  const visibleSnapshot = useMemo<Snapshot>(
+    () =>
+      showAll ? snapshot : { ...snapshot, prompts: snapshot.prompts.filter(p => !p.viaAdmin) },
+    [snapshot, showAll]
+  );
+
   const value = useMemo<PromptLibraryValue>(
     () => ({
-      ...snapshot,
+      ...visibleSnapshot,
+      allPrompts: snapshot.prompts,
+      canShowAll,
+      showAll,
+      setShowAll,
+      hiddenByAdminCount,
+      updateAccess,
       loading,
       error,
       refresh,
@@ -400,7 +507,13 @@ export function PromptLibraryProvider({ children }: { children: React.ReactNode 
       removeLabel,
     }),
     [
-      snapshot,
+      visibleSnapshot,
+      snapshot.prompts,
+      canShowAll,
+      showAll,
+      setShowAll,
+      hiddenByAdminCount,
+      updateAccess,
       loading,
       error,
       refresh,

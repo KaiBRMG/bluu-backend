@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { checkPageAccess, handleApiError } from '@/lib/middleware/apiHelpers';
-import { createPrompt, getPromptLibrary, MAX_TEXT_LENGTH } from '@/lib/services/promptLibraryService';
+import {
+  createPrompt,
+  getPromptLibraryFor,
+  getPromptViewer,
+  MAX_TEXT_LENGTH,
+} from '@/lib/services/promptLibraryService';
 import { isValidModelId, MAX_MODELS_PER_PROMPT } from '@/types/promptLibrary';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -10,7 +15,7 @@ export const PAGE_ID = 'apps-prompt-library';
 /**
  * GET /api/prompt-library
  *
- * The whole library in one response: head docs (each carrying its current text)
+ * The library AS THIS CALLER MAY SEE IT, in one response: head docs (each carrying its current text)
  * plus the managed taxonomy. Search, the LLM pages and the detail cards all run
  * off this single payload — the versions subcollection is a separate, lazy call.
  */
@@ -19,8 +24,15 @@ export const GET = withAuth(async (_req: NextRequest, token: DecodedIdToken) => 
     const denied = await checkPageAccess(token.uid, PAGE_ID);
     if (denied) return denied;
 
-    const { prompts, taxonomy } = await getPromptLibrary();
-    return NextResponse.json({ prompts, taxonomy });
+    // Filtered per caller: a prompt that is not theirs is simply absent.
+    const viewer = await getPromptViewer(token.uid, token.admin === true);
+    const { prompts, taxonomy } = await getPromptLibraryFor(viewer);
+    // Per-person response: never storable by a shared cache, and the client keeps
+    // its own sessionStorage copy, so the browser cache adds nothing either.
+    return NextResponse.json(
+      { prompts, taxonomy, viewer: { isAdmin: viewer.isAdmin, groups: viewer.groups } },
+      { headers: { 'Cache-Control': 'private, no-store' } }
+    );
   } catch (err) {
     return handleApiError(err, 'prompt-library GET');
   }

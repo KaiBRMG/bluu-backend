@@ -130,6 +130,7 @@ export function RichPromptEditor({
   placeholder,
   toolbarHost,
   toolbarLabel = 'Prompt formatting',
+  readOnly = false,
 }: {
   id: string;
   initialHtml: string;
@@ -166,6 +167,12 @@ export function RichPromptEditor({
   toolbarHost?: HTMLElement | null;
   /** Accessible name of the formatting toolbar — say what is being formatted. */
   toolbarLabel?: string;
+  /**
+   * View-only access: same rendering and selection (so the text can still be
+   * read and copied), but not editable and with no formatting toolbar. Fixed for
+   * the life of an editor — the host remounts it when a role changes.
+   */
+  readOnly?: boolean;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -485,18 +492,20 @@ export function RichPromptEditor({
 
   return (
     <div className={`flex flex-col gap-2 ${className ?? ''}`}>
-      {toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar}
+      {readOnly ? null : toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar}
 
       <div
         id={id}
         ref={bodyRef}
         role="textbox"
         aria-multiline
+        aria-readonly={readOnly || undefined}
+        tabIndex={readOnly ? 0 : undefined}
         aria-label={ariaLabel}
         aria-invalid={invalid ? true : undefined}
         aria-describedby={describedBy}
         data-placeholder={placeholder}
-        contentEditable
+        contentEditable={!readOnly}
         suppressContentEditableWarning
         spellCheck={false}
         onInput={publish}

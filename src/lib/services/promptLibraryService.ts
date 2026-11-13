@@ -5,6 +5,14 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { summariseChange } from '@/lib/promptDiff';
 import { htmlToPlainText, sanitizePromptHtml } from '@/lib/promptHtml';
 import {
+  buildPromptViewer,
+  isValidAccessKey,
+  resolveRole,
+  visibleAccess,
+  type PromptViewer,
+} from '@/lib/promptAccess';
+import { getUserById } from '@/lib/services/userService';
+import {
   EMPTY_TAXONOMY,
   isValidModelId,
   mergeModels,
@@ -12,6 +20,11 @@ import {
   MAX_MODELS_PER_PROMPT,
   type ChangeStat,
   type LlmType,
+  EMPTY_ACCESS,
+  type PromptAccess,
+  type PromptAccessChange,
+  type PromptGrant,
+  type PromptRole,
   type PromptCreateInput,
   type PromptDocument,
   type PromptMetaInput,
@@ -148,6 +161,26 @@ function readLlmTypes(d: any): LlmType[] {
   return isValidModelId(d?.llmType) ? [d.llmType] : [];
 }
 
+function readGrants(v: any): Record<string, PromptGrant> {
+  const out: Record<string, PromptGrant> = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const [key, raw] of Object.entries<any>(v)) {
+    if (!isValidAccessKey(key) || !raw || typeof raw !== 'object') continue;
+    if (raw.role !== 'view' && raw.role !== 'edit') continue;
+    out[key] = {
+      role: raw.role,
+      grantedBy: typeof raw.grantedBy === 'string' ? raw.grantedBy : '',
+      grantedAt: typeof raw.grantedAt === 'string' ? raw.grantedAt : new Date(0).toISOString(),
+    };
+  }
+  return out;
+}
+
+/** A prompt with no `access` field has no grants — admins only. No migration. */
+function readAccess(d: any): PromptAccess {
+  return { users: readGrants(d?.access?.users), groups: readGrants(d?.access?.groups) };
+}
+
 function mapPrompt(doc: FirebaseFirestore.QueryDocumentSnapshot): PromptDocument {
   const d = doc.data() ?? {};
   const created = typeof d.createdTime === 'string' ? d.createdTime : new Date(0).toISOString();
@@ -168,6 +201,11 @@ function mapPrompt(doc: FirebaseFirestore.QueryDocumentSnapshot): PromptDocument
     editNote: clampText(d.editNote, MAX_EDIT_NOTE_LENGTH),
     isArchived: d.isArchived === true,
     shareId: isValidShareId(d.share?.id) ? d.share.id : null,
+    // Internal defaults: the cached snapshot is shared between callers, so the
+    // per-caller fields are only ever set by `projectPrompt`.
+    access: readAccess(d),
+    myRole: 'edit',
+    viaAdmin: false,
     createdTime: created,
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : '',
     lastUpdatedTime: typeof d.lastUpdatedTime === 'string' ? d.lastUpdatedTime : created,
@@ -239,13 +277,143 @@ export async function getPromptLibrary(): Promise<PromptLibrarySnapshot> {
   return data;
 }
 
-/** Full version history for one prompt, newest first. Never cached in-process —
- *  it is only fetched when a detail card opens, and the client caches it. */
-export async function getPromptVersions(id: string): Promise<PromptVersion[] | null> {
-  const head = await adminDb.collection(PROMPTS_COLLECTION).doc(id).get();
-  if (!head.exists) return null;
+// ─── Access ──────────────────────────────────────────────────────────────────
 
-  const snap = await head.ref.collection(VERSIONS_SUBCOLLECTION).get();
+/** The caller's access identity. One cached user read serves it. */
+export async function getPromptViewer(uid: string, hasAdminClaim: boolean): Promise<PromptViewer> {
+  const user = await getUserById(uid);
+  const groups: string[] = Array.isArray(user?.groups)
+    ? user.groups.filter((g: unknown): g is string => typeof g === 'string')
+    : [];
+  return buildPromptViewer(uid, groups, hasAdminClaim);
+}
+
+/**
+ * Per-caller view of a prompt, or `null` when it does not exist for them.
+ *
+ * Viewers get no `access` map: who else holds a grant is not theirs to know.
+ */
+export function projectPrompt(p: PromptDocument, viewer: PromptViewer): PromptDocument | null {
+  const resolved = resolveRole(p.access ?? EMPTY_ACCESS, viewer);
+  if (!resolved) return null;
+  return {
+    ...p,
+    access: p.access ? visibleAccess(p.access, resolved.role) : null,
+    myRole: resolved.role,
+    viaAdmin: resolved.viaAdmin,
+  };
+}
+
+/**
+ * The library as one caller may see it. The 60s cache stays global and is
+ * filtered per call — an admin also receives the prompts outside their grants,
+ * flagged `viaAdmin`, so the "Show all prompts" switch needs no refetch.
+ */
+export async function getPromptLibraryFor(viewer: PromptViewer): Promise<PromptLibrarySnapshot> {
+  const { prompts, taxonomy } = await getPromptLibrary();
+  const visible: PromptDocument[] = [];
+  for (const p of prompts) {
+    const projected = projectPrompt(p, viewer);
+    if (projected) visible.push(projected);
+  }
+  return { prompts: visible, taxonomy };
+}
+
+/**
+ * The caller's role on one prompt, read FRESH from Firestore. Writes use this
+ * rather than the 60s snapshot so a revoked editor cannot keep writing for up to
+ * a minute. `'missing'` covers both "no such prompt" and "not yours" — the
+ * caller must answer both with the same 404.
+ */
+export async function getPromptRole(id: string, viewer: PromptViewer): Promise<PromptRole | 'missing'> {
+  const snap = await adminDb.collection(PROMPTS_COLLECTION).doc(id).get();
+  if (!snap.exists) return 'missing';
+  const resolved = resolveRole(readAccess(snap.data()), viewer);
+  return resolved ? resolved.role : 'missing';
+}
+
+export type AccessUpdateResult =
+  | { ok: true; access: PromptAccess }
+  | { ok: false; status: 400 | 404; error: string };
+
+/**
+ * Applies a DELTA to a prompt's grants inside a transaction, so two editors
+ * sharing at once merge instead of overwriting each other.
+ *
+ * Only active, unarchived employees and real groups may be granted — a creator
+ * or training-candidate id is never a valid grantee.
+ */
+export async function updatePromptAccess(
+  id: string,
+  change: PromptAccessChange,
+  uid: string
+): Promise<AccessUpdateResult> {
+  const sets = change.set ?? [];
+  const removes = change.remove ?? [];
+
+  const userIds = Array.from(new Set(sets.filter(g => g.kind === 'user').map(g => g.id)));
+  const groupIds = Array.from(new Set(sets.filter(g => g.kind === 'group').map(g => g.id)));
+
+  // Only the ids being granted are read, only the two fields that matter, and the
+  // two lookups run together — this also runs on every Undo.
+  const [userSnaps, groupSnaps] = await Promise.all([
+    userIds.length > 0
+      ? adminDb.getAll(...userIds.map(u => adminDb.collection('users').doc(u)), {
+          fieldMask: ['isActive', 'isArchived'],
+        })
+      : [],
+    groupIds.length > 0
+      ? adminDb.getAll(...groupIds.map(g => adminDb.collection('groups').doc(g)), { fieldMask: ['id'] })
+      : [],
+  ]);
+  const badUser = userSnaps.some(sn => {
+    const d = sn.data();
+    return !sn.exists || d?.isActive === false || d?.isArchived === true;
+  });
+  if (badUser) return { ok: false, status: 400, error: 'One of those people cannot be given access' };
+  if (groupSnaps.some(sn => !sn.exists)) return { ok: false, status: 400, error: 'Unknown group' };
+
+  const headRef = adminDb.collection(PROMPTS_COLLECTION).doc(id);
+  const result = await adminDb.runTransaction(async tx => {
+    const snap = await tx.get(headRef);
+    if (!snap.exists) return null;
+
+    const access = readAccess(snap.data());
+    const now = new Date().toISOString();
+
+    for (const g of sets) {
+      const bucket = g.kind === 'user' ? access.users : access.groups;
+      const existing = bucket[g.id];
+      // Re-granting the same role keeps the original "added by" record.
+      bucket[g.id] =
+        existing && existing.role === g.role
+          ? existing
+          : { role: g.role, grantedBy: existing?.grantedBy || uid, grantedAt: existing?.grantedAt || now };
+    }
+    for (const r of removes) {
+      delete (r.kind === 'user' ? access.users : access.groups)[r.id];
+    }
+
+    tx.update(headRef, { access, updatedAt: FieldValue.serverTimestamp() });
+    return access;
+  });
+
+  if (!result) return { ok: false, status: 404, error: 'Prompt not found' };
+  invalidatePromptLibraryCache();
+  return { ok: true, access: result };
+}
+
+/** Full version history for one prompt, newest first. Never cached in-process —
+ *  it is only fetched when a detail card opens, and the client caches it.
+ *  Authorisation is the CALLER's job (`guardPrompt`); this does not check. */
+export async function getPromptVersions(id: string): Promise<PromptVersion[]> {
+  // No head read: every caller has already passed `guardPrompt`, which read the
+  // head fresh and proved the prompt exists and is visible to them.
+  const snap = await adminDb
+    .collection(PROMPTS_COLLECTION)
+    .doc(id)
+    .collection(VERSIONS_SUBCOLLECTION)
+    .get();
   return snap.docs.map(mapVersion).sort((a, b) => b.version - a.version);
 }
 
@@ -263,7 +431,7 @@ export async function createPrompt(
   // `shareId` is deliberately absent: it is the READ shape of the stored `share`
   // map, which only ensurePromptShare writes. An unshared prompt carries no
   // sharing field at all.
-  const doc: Omit<PromptDocument, 'id' | 'shareId'> = {
+  const doc: Omit<PromptDocument, 'id' | 'shareId' | 'access' | 'myRole' | 'viaAdmin'> = {
     llmTypes: llmTypes.length > 0 ? llmTypes : ['chatgpt'],
     category: cleanLabel(input.category),
     title: clampText(input.title, MAX_TITLE_LENGTH).trim(),
@@ -282,10 +450,17 @@ export async function createPrompt(
     lastUpdatedBy: uid,
   };
 
+  // The organisation owns every prompt; its creator is simply the first editor.
+  const access: PromptAccess = {
+    users: { [uid]: { role: 'edit', grantedBy: uid, grantedAt: now } },
+    groups: {},
+  };
+
   const ref = adminDb.collection(PROMPTS_COLLECTION).doc();
   const batch = adminDb.batch();
   batch.set(ref, {
     ...doc,
+    access,
     // Still written singular so a renderer running an older bundle — which may
     // be weeks old — keeps resolving this prompt's model (rule 9c).
     llmType: doc.llmTypes[0],
@@ -309,7 +484,7 @@ export async function createPrompt(
   await mergeTaxonomy(doc.category ? [doc.category] : [], doc.tags, []);
 
   invalidatePromptLibraryCache();
-  return { id: ref.id, ...doc, shareId: null };
+  return { id: ref.id, ...doc, shareId: null, access, myRole: 'edit', viaAdmin: false };
 }
 
 export interface AddVersionResult {

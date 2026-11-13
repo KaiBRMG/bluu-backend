@@ -39,3 +39,13 @@ export const HAIRLINE = 'border-white/[0.07]';
 export const SURFACE_INTERACTIVE =
   'transition-colors duration-[120ms] hover:bg-white/[0.055] active:bg-white/[0.08] ' +
   'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50';
+
+/**
+ * A selected `ToggleGroupItem`, inked Action Blue Deep — shadcn's `outline`
+ * variant paints hover and selected identically, so a selected segment would be
+ * indistinguishable from a hovered one. The trailing `!` beats the primitive's
+ * own same-specificity `data-[state=on]` rule regardless of stylesheet order.
+ * (Moved here from Growth Tracking; see DESIGN.md, Buttons.)
+ */
+export const SEGMENT_ITEM_CLASS =
+  'text-xs data-[state=on]:bg-[#2563eb]! data-[state=on]:font-medium data-[state=on]:text-white!';

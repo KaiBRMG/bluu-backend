@@ -1722,6 +1722,11 @@
     },
     {
       "collectionGroup": "prompt-library",
+      "fieldPath": "access",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "prompt-library",
       "fieldPath": "share",
       "indexes": []
     },

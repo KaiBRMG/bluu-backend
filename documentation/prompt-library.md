@@ -1,6 +1,6 @@
 # Prompt Library (`prompt-library` collection)
 
-> `/applications/apps-prompt-library` — a shared store of LLM prompts, each targeting one or more models, each with its own version history. Two routes share one fetch; search runs entirely on the client; **the detail card is a dialog, not a page**.
+> `/applications/apps-prompt-library` — a store of LLM prompts **owned by the organisation and shared per person or group**, each targeting one or more models, each with its own version history. Two routes share one fetch; search runs entirely on the client; **the detail card is a dialog, not a page**.
 
 ## Dependencies / Interacting Files
 
@@ -14,7 +14,11 @@
 | `src/app/api/prompt-library/route.ts` | GET the whole library + taxonomy · POST create |
 | `src/app/api/prompt-library/[id]/route.ts` | PATCH metadata/archive · DELETE (**admin claim**) |
 | `src/app/api/prompt-library/[id]/versions/route.ts` | GET history · POST a new version · PATCH one in place |
-| `src/app/api/prompt-library/[id]/share/route.ts` | POST mint/return the public share link · DELETE revoke it |
+| `src/app/api/prompt-library/[id]/share/route.ts` | POST mint/return the public share link · DELETE revoke it (**edit** access) |
+| `src/app/api/prompt-library/[id]/access/route.ts` | PUT a delta to who a prompt is shared with (**edit** access) |
+| `src/app/api/prompt-library/_guard.ts` | **`withPromptAuth(label, 'view'|'edit', handler)`** — how every `[id]/*` route is built: sign-in → page permission → per-prompt role → error handling. A route that skips the check is one that doesn't use the wrapper (hard delete is the lone exception: admin **claim**) |
+| `src/lib/promptAccess.ts` | Pure role resolver (`resolveRole`, `visibleAccess`) — client-safe. `buildPromptViewer` **is** `buildResourceActor`: one admin test (claim OR `admin` group) |
+| `…/_components/SharePromptDialog.tsx` | The Share dialog (people/groups picker, role per grant, public-link switch) + `AccessCount`. Mounted only while open — it carries the staff directory |
 | `src/lib/promptShareUrl.ts` | `promptShareUrl` (public URL) and `promptDeepLink` (`bluu://prompt?id=`) |
 | `src/app/p/[shareId]/` | The **public, unauthenticated** read-only page + its `_components` |
 | `src/components/DeepLinkRouter.tsx` | Turns `bluu://prompt?id=…` into a navigation that opens the detail dialog |
@@ -48,15 +52,26 @@
 | `change` | `ChangeStat` \| null | `{added, removed, ratio, region, kind}` — still computed and stored, no longer displayed |
 | `editNote` | string | The author's note for the current version. `''` when none |
 | `isArchived` | boolean | Hidden from lists and search; recoverable. Also **stops the public share page resolving** |
-| `share` | `{id, createdBy, createdTime}` \| absent | The public share token. Absent until someone copies a link; read back as `shareId` |
+| `share` | `{id, createdBy, createdTime}` \| absent | The public share token. Absent until someone turns the public link on; read back as `shareId` |
+| `access` | `{users: {uid: Grant}, groups: {groupId: Grant}}` \| absent | Who may open the prompt, `Grant = {role: 'view'\|'edit', grantedBy, grantedAt}`. **Absent = no grants = admins only.** Exempted from indexing |
 | `createdTime` / `lastUpdatedTime` | string (ISO) | |
 | `createdBy` / `lastUpdatedBy` | string (uid) | |
 | `createdAt` / `updatedAt` | Timestamp | Audit fields |
 
 ## Authorization
 
-- Reads and ordinary writes: the **`apps-prompt-library` page permission** (tier 2, via `checkPageAccess`). Anyone with the page can create prompts, save versions, edit metadata, archive, coin labels, **add a model type**, and **share or unshare a prompt**.
-- **`/p/[shareId]` is the one unauthenticated read path.** It is gated by the share token alone, and projects a narrow read-only view — see *Sharing a prompt*.
+**The organisation owns every prompt.** There is no individual owner: admins (the `token.admin` claim or the `admin` group) are the implicit owner of all prompts, existing and future, and are never stored as a grant. Whoever creates a prompt is simply its first **editor** (`access.users[uid] = edit`). Existing prompts have no `access` field, so they are admin-only until someone shares them — **no migration was run**.
+
+- **The page permission is the outer gate** (tier 2, `checkPageAccess`). **Inside it, every `[id]` route is built with `withPromptAuth`**, which reads the head doc *fresh* (not the 60s snapshot, so a revoked editor cannot keep writing for a minute) and resolves the caller's role:
+  - **`view`** — read the prompt and its version history, copy text, copy an *existing* public link.
+  - **`edit`** — everything else about the prompt: save/overwrite versions, edit metadata, archive/restore, **change who it is shared with**, turn the public link on/off. (Editors manage sharing by decision, not only an owner; every grant records `grantedBy`/`grantedAt`, shown in the Share dialog, as the check on access spreading.)
+  - **admin** — `edit` on everything, whether or not it was shared with them. Their everyday board shows only what is shared with them; the rest sits behind **Show all prompts** (`viaAdmin: true`, remembered in localStorage).
+  - **none** — the prompt does not exist: **404, never 403**, so ids cannot be probed. A viewer attempting a write gets 403 (they can already see it).
+- User and group grants are unioned, highest wins. **Group grants resolve at read time** — joining a group later grants access. `src/lib/promptAccess.ts` is the one definition.
+- `GET /api/prompt-library` is **filtered per caller** (`getPromptLibraryFor`) and sends `Cache-Control: private, no-store`. The 60s server cache stays global and is filtered after the read. Each prompt carries `myRole`/`viaAdmin`; **a viewer's copy has `access: null`** — who else holds a grant is not theirs to know.
+- `PUT …/access` takes a **delta** (`{set:[{kind,id,role}], remove:[{kind,id}]}`), merged in a transaction so two editors sharing at once both land. Grantees must be active, unarchived `users` docs (a creator or training-candidate id is refused) or a real group. The response says what the caller now holds (`myRole: null` → the client drops the prompt).
+- Taxonomy (categories, tags, models) stays **global** — a label is not a prompt.
+- **`/p/[shareId]` is the one unauthenticated read path** (the public link, unchanged — it is simply one row of the sharing model). It is gated by the share token alone, and projects a narrow read-only view — see *Sharing a prompt*.
 - **Hard delete requires the `token.admin` claim** (tier 3). Archiving is the reversible act anyone can take; destroying a version history is not. See [auth.md](auth.md#authorization-tiers-least--most-privileged).
 
 ## Many models per prompt — and no migration
@@ -210,22 +225,24 @@ The input is a **combobox** (`role="combobox"` + `aria-activedescendant`) over a
 ## Read/write budget
 
 - **One** provider (`PromptLibraryProvider`, mounted in the segment `layout.tsx`) serves the home screen, every model page and every detail card — navigating between them refetches nothing, and opening a prompt is now not even a navigation.
-- Client cache: sessionStorage, 5-min TTL, key `bluu_prompt_library_v2`. **The key was bumped** because the cached shape gained `taxonomy.models`, `llmTypes` and the rich body; a stale `_v1` entry would render a modelless library. Server cache: 60s in-process, busted by every write.
+- Client cache: sessionStorage, 5-min TTL, key `bluu_prompt_library_v3`. **The key was bumped** because the shape gained `access`/`myRole`/`viaAdmin` *and the list is now per person* — a stale `_v2` entry would still hold prompts that are no longer theirs. (`_v2` itself replaced a `_v1` that predated `llmTypes`.) Server cache: 60s in-process, busted by every write.
 - Mutations **patch state and the cache in place**; no write is followed by a re-read.
 - Version histories are fetched per prompt on first open and memoised for the session.
 - Coining a label or a model writes; reusing one does not (`mergeTaxonomy` skips the write when nothing is new).
 
 ## Sharing a prompt
 
+> **Copy link** is now **Share**. The detail card's Share button (editors only) opens `SharePromptDialog`: one combobox over people **and** groups, a role (Can view / Can edit, default view), then Add. Every change saves at once with an Undo toast — there is no Save button. The first row, **Bluu Rock admins · Owner**, is locked: it is the organisation's ownership, not a grant. A deactivated grantee shows muted with only *Remove*. Dropping your own access asks first. The public link is a switch in the same dialog and works exactly as below. The board has an **All · Created by me · Shared with me** filter, and cards you did not write carry a small Users mark (a viewer is told their own role, never the grant behind it).
+
 > **Copy link** on the detail card mints a public URL; the recipient gets a read-only page in an ordinary browser, with a button that hands the prompt back to the desktop app.
 
 ### The link
 
-`POST /api/prompt-library/[id]/share` (tier 2, the page permission) mints a **32-character base32 token — ~160 bits** and records it twice: `prompt-library/{id}.share = { id, createdBy, createdTime }`, and a reverse-index doc `prompt-shares/{shareId} → { promptId, createdBy }`. Both writes are in one transaction over the head document, so two people hitting Copy link at the same moment cannot mint two tokens and orphan one index doc.
+`POST /api/prompt-library/[id]/share` (tier 2, the page permission **plus edit access to the prompt**) mints a **32-character base32 token — ~160 bits** and records it twice: `prompt-library/{id}.share = { id, createdBy, createdTime }`, and a reverse-index doc `prompt-shares/{shareId} → { promptId, createdBy }`. Both writes are in one transaction over the head document, so two people hitting Copy link at the same moment cannot mint two tokens and orphan one index doc.
 
 Three properties, each deliberate:
 
-- **Minted on demand, not at creation.** A prompt with no `shareId` has no public URL *at all*. Sharing is an explicit act.
+- **Minted on demand, not at creation.** A prompt with no `shareId` has no public URL *at all*. Turning the public link on (an **editor** act, in the Share dialog) is explicit.
 - **Idempotent.** Copying twice returns the same link, so a URL already sent to someone keeps resolving.
 - **Revocable, permanently.** "Stop sharing" (`DELETE`) destroys the token and the index doc; re-sharing later mints a *new* one. A revoked link is dead, not dormant.
 
@@ -254,15 +271,15 @@ The button fires `bluu://prompt?id=<promptId>`. `main.js` does not interpret it 
 
 `DeepLinkRouter` reads `getPendingDeepLink()` on mount *and* subscribes to `onDeepLink`: a link that launches a cold app arrives before React exists. Its `router.push` is imperative, so it arms the watchdog with `watchNavigation` — `NavigationWatchdog`'s own listener only sees anchor clicks.
 
-### The "Public Prompts" section
+### The "Public links" section
 
-A **right-hand rail** on the home screen ([`PublicPrompts.tsx`](../src/app/(main)/applications/apps-prompt-library/_components/PublicPrompts.tsx)) — every prompt currently readable by anyone holding a link.
+(Renamed from "Public Prompts".) A **right-hand rail** on the home screen ([`PublicPrompts.tsx`](../src/app/(main)/applications/apps-prompt-library/_components/PublicPrompts.tsx)) — every prompt **the caller can see** that is currently readable by anyone holding a link (it reads the already-filtered library, so an editor never sees a stranger's public link).
 
 - **The rail is a container query, not a breakpoint** (`@container/library` + `@min-[83rem]`). Whether it fits depends on the width of the content COLUMN, which changes when the sidebar collapses; a `min-[…]` media query measures the window and would get that wrong in both directions. 83rem is the sum it needs — 64rem of board, the 2rem gap, a 17rem rail — and below it the rail drops back underneath the board, which is where it used to live. **The board keeps its full 64rem measure at every width**; the rail only ever occupies space the page was leaving empty.
 - The list is its own container too (`@container/shared`), so the copy button sheds its text label in the rail and keeps it when the list is full-width. Its accessible name is unchanged either way.
 - **A flat list, not the board.** The question it answers is "what have we put on the open internet?"; grouping by category would scatter the answer. Newest-updated first.
 - **Rendered even when empty**, unlike *Recently updated*. An absent section is indistinguishable from one you scrolled past, and a silence is not the same as an explicit "nothing is shared".
-- **Archived prompts are excluded even when they still carry a share token**, because `getSharedPrompt` refuses an archived prompt — its link already 404s, so listing it would report exposure that does not exist. The token stays on the document and comes back if the prompt is restored, which is why archiving is **not** a substitute for "Stop sharing".
+- **Archived prompts are excluded even when they still carry a share token**, because `getSharedPrompt` refuses an archived prompt — its link already 404s, so listing it would report exposure that does not exist. The token stays on the document and comes back if the prompt is restored, which is why archiving is **not** a substitute for turning the public link off.
 - Its Copy-link button **issues no request** — the token is already on the head doc, so the URL is built locally rather than re-POSTing the share route for a share that exists.
 
 ### The button is not gated

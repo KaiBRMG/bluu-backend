@@ -1,58 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { checkPageAccess, handleApiError } from '@/lib/middleware/apiHelpers';
-import { deletePrompt, updatePromptMeta } from '@/lib/services/promptLibraryService';
+import { handleApiError } from '@/lib/middleware/apiHelpers';
+import { deletePrompt, projectPrompt, updatePromptMeta } from '@/lib/services/promptLibraryService';
 import { isValidModelId, MAX_MODELS_PER_PROMPT, type PromptMetaInput } from '@/types/promptLibrary';
-import { PAGE_ID } from '../route';
+import { withPromptAuth } from '../_guard';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
 /**
  * PATCH /api/prompt-library/[id]
- * Title / category / tags / LLM / archive state. Does not cut a new version —
+ * Title / category / tags / LLM / archive state. Editors and admins only. Does not cut a new version —
  * version history tracks the prompt TEXT, which moves through the versions route.
  */
-export const PATCH = withAuth(async (
-  req: NextRequest,
-  token: DecodedIdToken,
-  params: Promise<{ id: string }>
-) => {
-  try {
-    const denied = await checkPageAccess(token.uid, PAGE_ID);
-    if (denied) return denied;
+export const PATCH = withPromptAuth('prompt-library PATCH', 'edit', async (req, { id, token, viewer }) => {
+  const body = await req.json();
 
-    const { id } = await params;
-    const body = await req.json();
-
-    if (
-      body?.llmTypes !== undefined &&
-      (!Array.isArray(body.llmTypes) ||
-        body.llmTypes.length === 0 ||
-        body.llmTypes.length > MAX_MODELS_PER_PROMPT ||
-        !body.llmTypes.every(isValidModelId))
-    ) {
-      return NextResponse.json({ error: 'Choose at least one model' }, { status: 400 });
-    }
-    if (body?.title !== undefined && (typeof body.title !== 'string' || !body.title.trim())) {
-      return NextResponse.json({ error: 'Title cannot be empty' }, { status: 400 });
-    }
-    if (body?.category !== undefined && (typeof body.category !== 'string' || !body.category.trim())) {
-      return NextResponse.json({ error: 'Category cannot be empty' }, { status: 400 });
-    }
-
-    const input: PromptMetaInput = {
-      llmTypes: body?.llmTypes,
-      category: body?.category,
-      title: body?.title,
-      tags: Array.isArray(body?.tags) ? body.tags : undefined,
-      isArchived: typeof body?.isArchived === 'boolean' ? body.isArchived : undefined,
-    };
-
-    const prompt = await updatePromptMeta(id, input, token.uid);
-    if (!prompt) return NextResponse.json({ error: 'Prompt not found' }, { status: 404 });
-    return NextResponse.json({ prompt });
-  } catch (err) {
-    return handleApiError(err, 'prompt-library PATCH');
+  if (
+    body?.llmTypes !== undefined &&
+    (!Array.isArray(body.llmTypes) ||
+      body.llmTypes.length === 0 ||
+      body.llmTypes.length > MAX_MODELS_PER_PROMPT ||
+      !body.llmTypes.every(isValidModelId))
+  ) {
+    return NextResponse.json({ error: 'Choose at least one model' }, { status: 400 });
   }
+  if (body?.title !== undefined && (typeof body.title !== 'string' || !body.title.trim())) {
+    return NextResponse.json({ error: 'Title cannot be empty' }, { status: 400 });
+  }
+  if (body?.category !== undefined && (typeof body.category !== 'string' || !body.category.trim())) {
+    return NextResponse.json({ error: 'Category cannot be empty' }, { status: 400 });
+  }
+
+  const input: PromptMetaInput = {
+    llmTypes: body?.llmTypes,
+    category: body?.category,
+    title: body?.title,
+    tags: Array.isArray(body?.tags) ? body.tags : undefined,
+    isArchived: typeof body?.isArchived === 'boolean' ? body.isArchived : undefined,
+  };
+
+  const prompt = await updatePromptMeta(id, input, token.uid);
+  if (!prompt) return NextResponse.json({ error: 'Prompt not found' }, { status: 404 });
+  return NextResponse.json({ prompt: projectPrompt(prompt, viewer) });
 });
 
 /**

@@ -109,6 +109,51 @@ export interface ChangeStat {
   kind: ChangeKind;
 }
 
+/** What a grant lets someone do. `view` is the default for every new grant. */
+export type PromptRole = 'view' | 'edit';
+
+export interface PromptGrant {
+  role: PromptRole;
+  /** uid of the person who added the grant — the only check on access spreading. */
+  grantedBy: string;
+  grantedAt: string;
+}
+
+/**
+ * Who may open a prompt, beyond the organisation (admins), which owns every
+ * prompt implicitly and is never stored here.
+ */
+export interface PromptAccess {
+  users: Record<string, PromptGrant>;
+  groups: Record<string, PromptGrant>;
+}
+
+export const EMPTY_ACCESS: PromptAccess = { users: {}, groups: {} };
+
+/** Who a grant is for: a person or a group. */
+export interface PromptGrantTarget {
+  kind: 'user' | 'group';
+  id: string;
+}
+
+/** A delta to who a prompt is shared with. Shared by the route, service and client. */
+export interface PromptAccessChange {
+  set?: (PromptGrantTarget & { role: PromptRole })[];
+  remove?: PromptGrantTarget[];
+}
+
+/**
+ * The caller's own access identity, sent with the library so the client never has
+ * to GUESS it. The server's admin test is the claim OR the group; a client check
+ * of the group alone disagrees for anyone holding only the claim.
+ */
+export interface PromptViewerInfo {
+  isAdmin: boolean;
+  groups: string[];
+}
+
+export const EMPTY_VIEWER: PromptViewerInfo = { isAdmin: false, groups: [] };
+
 /**
  * The head of a prompt. Carries the CURRENT text so the list, the search index
  * and the detail card's default view all come from one collection read — the
@@ -151,6 +196,19 @@ export interface PromptDocument {
    * revoking it (which clears this) genuinely removes the page.
    */
   shareId: string | null;
+  /**
+   * Grants on this prompt. `null` for a viewer — view-only people never learn who
+   * else has access. Editors and admins receive the full map.
+   */
+  access: PromptAccess | null;
+  /**
+   * The caller's effective role. Admins are always `edit`: the organisation owns
+   * every prompt. Set per caller by the server; meaningless in a cached snapshot
+   * shared between callers.
+   */
+  myRole: PromptRole;
+  /** True when the caller sees this prompt only because they are an admin. */
+  viaAdmin: boolean;
   createdTime: string;
   createdBy: string;
   lastUpdatedTime: string;

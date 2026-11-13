@@ -46,8 +46,8 @@ export function PublicPrompts({
   if (shared.length === 0) {
     return (
       <p className="text-sm text-zinc-400">
-        No prompts are shared publicly. Use <span className="text-zinc-300">Copy link</span> on a
-        prompt to create a public, read-only page for it.
+        None of your prompts have a public link. Turn one on from a prompt’s{' '}
+        <span className="text-zinc-300">Share</span> button.
       </p>
     );
   }

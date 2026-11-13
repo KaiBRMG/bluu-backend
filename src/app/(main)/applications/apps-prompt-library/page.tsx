@@ -5,8 +5,13 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Globe, Plus } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
+import { useAuth } from '@/components/AuthProvider';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
+import { SEGMENT_ITEM_CLASS } from '@/lib/surfaces';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { usePromptLibrary } from '@/contexts/PromptLibraryContext';
 import { type PromptModel } from '@/types/promptLibrary';
 import { LlmMark } from './_components/LlmMark';
@@ -17,6 +22,9 @@ import { PromptDetailDialog } from './_components/PromptDetailDialog';
 import { PromptKanban } from './_components/PromptKanban';
 import { PublicPrompts } from './_components/PublicPrompts';
 import { pluralise } from './_lib/format';
+
+type Scope = 'all' | 'mine' | 'shared';
+
 
 function LlmTile({ llm, count, share }: {
   llm: PromptModel;
@@ -90,14 +98,32 @@ export default function PromptLibraryPage() {
 }
 
 function PromptLibraryBoard() {
-  const { prompts, models, loading, error } = usePromptLibrary();
+  const { prompts, models, loading, error, canShowAll, showAll, setShowAll, hiddenByAdminCount } =
+    usePromptLibrary();
+  const { user } = useAuth();
+  const myUid = user?.uid ?? '';
+  const [scope, setScope] = useState<Scope>('all');
   const [creating, setCreating] = useState(false);
   const [addingModel, setAddingModel] = useState(false);
   const [openPromptId, setOpenPromptId] = useState<string | null>(null);
 
   usePromptDeepLinkParam(setOpenPromptId);
 
-  const live = useMemo(() => prompts.filter(p => !p.isArchived), [prompts]);
+  const liveAll = useMemo(() => prompts.filter(p => !p.isArchived), [prompts]);
+  // "Created by me" is authorship; "Shared with me" is everything visible that
+  // someone else wrote (or, for an admin reading outside any grant, that was
+  // never shared with them at all).
+  const scopeCounts = useMemo(() => {
+    const mine = liveAll.filter(p => p.createdBy === myUid).length;
+    return { all: liveAll.length, mine, shared: liveAll.length - mine };
+  }, [liveAll, myUid]);
+  const live = useMemo(
+    () =>
+      scope === 'all'
+        ? liveAll
+        : liveAll.filter(p => (scope === 'mine') === (p.createdBy === myUid)),
+    [liveAll, scope, myUid]
+  );
 
   // A prompt targeting three models counts once under each of them.
   const counts = useMemo(() => {
@@ -129,6 +155,29 @@ function PromptLibraryBoard() {
             New prompt
           </Button>
         </header>
+
+        {/* The admin fallback. Off by default, so an admin's everyday board is
+            what has been shared with them, like everyone else's; on, it mixes
+            in every prompt in the organisation. Remembered per device. */}
+        {canShowAll && !loading && (
+          <div className="flex max-w-5xl items-center gap-3">
+            <Switch
+              id="show-all-prompts"
+              checked={showAll}
+              onCheckedChange={setShowAll}
+              disabled={hiddenByAdminCount === 0 && !showAll}
+            />
+            <label htmlFor="show-all-prompts" className="text-sm text-zinc-300">
+              Show all prompts
+              <span className="text-zinc-400">
+                {' '}
+                — {hiddenByAdminCount === 0
+                  ? 'everything is already shared with you'
+                  : `${hiddenByAdminCount} not shared with you`}
+              </span>
+            </label>
+          </div>
+        )}
 
         {error && (
           <p className="max-w-5xl rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
@@ -190,18 +239,59 @@ function PromptLibraryBoard() {
             <PromptSearch onOpen={setOpenPromptId} />
           </section>
 
-          {!loading && live.length > 0 && (
+          {!loading && liveAll.length > 0 && (
             <section aria-labelledby="recent-heading" className="flex flex-col gap-3">
-              <h2 id="recent-heading" className="text-lg font-semibold">
-                Recently updated
-              </h2>
-              <PromptKanban prompts={live} onOpen={setOpenPromptId} />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id="recent-heading" className="text-lg font-semibold">
+                  Recently updated
+                </h2>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={scope}
+                  // Radix emits '' when the active item is clicked again; a
+                  // filter with no value is not a state, so keep the current one.
+                  onValueChange={v => v && setScope(v as Scope)}
+                  aria-label="Which prompts to show"
+                >
+                  <ToggleGroupItem value="all" className={cn(SEGMENT_ITEM_CLASS, 'px-3')}>
+                    All <span className="tabular-nums opacity-70">{scopeCounts.all}</span>
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="mine" className={cn(SEGMENT_ITEM_CLASS, 'px-3')}>
+                    Created by me <span className="tabular-nums opacity-70">{scopeCounts.mine}</span>
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="shared" className={cn(SEGMENT_ITEM_CLASS, 'px-3')}>
+                    Shared with me <span className="tabular-nums opacity-70">{scopeCounts.shared}</span>
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+
+              {live.length > 0 ? (
+                <PromptKanban prompts={live} onOpen={setOpenPromptId} />
+              ) : (
+                // Empty because of the filter, not because there is nothing:
+                // it names what is behind it and carries its own way out.
+                <p className="text-sm text-zinc-400">
+                  {scope === 'mine'
+                    ? 'You haven’t created any prompts yet.'
+                    : 'Nothing has been shared with you yet.'}{' '}
+                  <button
+                    type="button"
+                    onClick={() => setScope('all')}
+                    className="rounded-sm text-zinc-200 underline underline-offset-2 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
+                  >
+                    Show all {scopeCounts.all}
+                  </button>
+                </p>
+              )}
             </section>
           )}
 
-          {!loading && live.length === 0 && !error && (
-            <p className="text-sm text-muted-foreground">
-              No prompts yet. Create the first one to start the library.
+          {!loading && liveAll.length === 0 && !error && (
+            <p className="text-sm text-zinc-400">
+              Nothing has been shared with you yet. Prompts you create, and ones colleagues share
+              with you, show up here.
             </p>
           )}
           </div>
@@ -222,11 +312,11 @@ function PromptLibraryBoard() {
               <div className="flex flex-col gap-1.5">
                 <h2 id="public-heading" className="flex items-center gap-2 text-lg font-semibold">
                   <Globe className="size-4 text-zinc-400" aria-hidden />
-                  Public Prompts
+                  Public links
                 </h2>
                 <p className="text-sm text-zinc-400">
-                  Readable by anyone with the link — no sign-in required. Stop sharing from a
-                  prompt’s ⋯ menu.
+                  Readable by anyone with the link — no sign-in required. Turn a link off from a
+                  prompt’s Share button.
                 </p>
               </div>
               <PublicPrompts prompts={prompts} onOpen={setOpenPromptId} />

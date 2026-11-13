@@ -1,36 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { withAuth } from '@/lib/middleware/withAuth';
-import { checkPageAccess, handleApiError } from '@/lib/middleware/apiHelpers';
+import { NextResponse } from 'next/server';
 import {
   addPromptVersion,
   getPromptVersions,
+  projectPrompt,
   updatePromptVersion,
   MAX_TEXT_LENGTH,
 } from '@/lib/services/promptLibraryService';
 import { MAX_EDIT_NOTE_LENGTH } from '@/types/promptLibrary';
-import { PAGE_ID } from '../../route';
-import type { DecodedIdToken } from 'firebase-admin/auth';
+import { withPromptAuth } from '../../_guard';
 
 /**
  * GET /api/prompt-library/[id]/versions
- * Full history, newest first. Only called when a detail card opens.
+ * Full history, newest first. Only called when a detail card opens. `view`
+ * access is enough: reading history is reading the prompt.
  */
-export const GET = withAuth(async (
-  _req: NextRequest,
-  token: DecodedIdToken,
-  params: Promise<{ id: string }>
-) => {
-  try {
-    const denied = await checkPageAccess(token.uid, PAGE_ID);
-    if (denied) return denied;
-
-    const { id } = await params;
-    const versions = await getPromptVersions(id);
-    if (!versions) return NextResponse.json({ error: 'Prompt not found' }, { status: 404 });
-    return NextResponse.json({ versions });
-  } catch (err) {
-    return handleApiError(err, 'prompt-library versions GET');
-  }
+export const GET = withPromptAuth('prompt-library versions GET', 'view', async (_req, { id }) => {
+  return NextResponse.json({ versions: await getPromptVersions(id) });
 });
 
 /**
@@ -66,43 +51,35 @@ function validateBody(body: unknown): NextResponse | null {
  * Saves edited text as a new version at the head. `basedOn` is the version the
  * editor was actually viewing — reaching back to revise v2 produces a new head
  * whose lineage reads "Edited from v2", and the diff is measured against v2.
+ * Edit access required.
  */
-export const POST = withAuth(async (
-  req: NextRequest,
-  token: DecodedIdToken,
-  params: Promise<{ id: string }>
-) => {
-  try {
-    const denied = await checkPageAccess(token.uid, PAGE_ID);
-    if (denied) return denied;
+export const POST = withPromptAuth('prompt-library versions POST', 'edit', async (req, { id, token, viewer }) => {
+  const body = await req.json();
 
-    const { id } = await params;
-    const body = await req.json();
-
-    const invalid = validateBody(body);
-    if (invalid) return invalid;
-    if (!Number.isInteger(body?.basedOn) || body.basedOn < 1) {
-      return NextResponse.json({ error: 'A source version is required' }, { status: 400 });
-    }
-
-    const result = await addPromptVersion(
-      id,
-      body.text,
-      body.textHtml,
-      body.editNote,
-      body.basedOn,
-      token.uid
-    );
-    if (result === null) {
-      return NextResponse.json({ error: 'Prompt or source version not found' }, { status: 404 });
-    }
-    if (result === 'unchanged') {
-      return NextResponse.json({ error: 'Nothing changed since that version' }, { status: 409 });
-    }
-    return NextResponse.json(result, { status: 201 });
-  } catch (err) {
-    return handleApiError(err, 'prompt-library versions POST');
+  const invalid = validateBody(body);
+  if (invalid) return invalid;
+  if (!Number.isInteger(body?.basedOn) || body.basedOn < 1) {
+    return NextResponse.json({ error: 'A source version is required' }, { status: 400 });
   }
+
+  const result = await addPromptVersion(
+    id,
+    body.text,
+    body.textHtml,
+    body.editNote,
+    body.basedOn,
+    token.uid
+  );
+  if (result === null) {
+    return NextResponse.json({ error: 'Prompt or source version not found' }, { status: 404 });
+  }
+  if (result === 'unchanged') {
+    return NextResponse.json({ error: 'Nothing changed since that version' }, { status: 409 });
+  }
+  return NextResponse.json(
+    { ...result, prompt: projectPrompt(result.prompt, viewer) },
+    { status: 201 }
+  );
 });
 
 /**
@@ -111,45 +88,31 @@ export const POST = withAuth(async (
  * Saves over an EXISTING version instead of cutting a new one — the correction
  * path, for a typo or a better edit note. `version` is the one on screen, which
  * may be an older one; the service only rewrites the head document's text when
- * that version IS the head.
- *
- * Same tier as POST: anyone with the page may edit prompts, and overwriting a
- * version is not a more privileged act than appending one.
+ * that version IS the head. Same access as POST: overwriting a version is not a
+ * more privileged act than appending one.
  */
-export const PATCH = withAuth(async (
-  req: NextRequest,
-  token: DecodedIdToken,
-  params: Promise<{ id: string }>
-) => {
-  try {
-    const denied = await checkPageAccess(token.uid, PAGE_ID);
-    if (denied) return denied;
+export const PATCH = withPromptAuth('prompt-library versions PATCH', 'edit', async (req, { id, token, viewer }) => {
+  const body = await req.json();
 
-    const { id } = await params;
-    const body = await req.json();
-
-    const invalid = validateBody(body);
-    if (invalid) return invalid;
-    if (!Number.isInteger(body?.version) || body.version < 1) {
-      return NextResponse.json({ error: 'A version is required' }, { status: 400 });
-    }
-
-    const result = await updatePromptVersion(
-      id,
-      body.version,
-      body.text,
-      body.textHtml,
-      body.editNote,
-      token.uid
-    );
-    if (result === null) {
-      return NextResponse.json({ error: 'Prompt or version not found' }, { status: 404 });
-    }
-    if (result === 'unchanged') {
-      return NextResponse.json({ error: 'Nothing changed in that version' }, { status: 409 });
-    }
-    return NextResponse.json(result);
-  } catch (err) {
-    return handleApiError(err, 'prompt-library versions PATCH');
+  const invalid = validateBody(body);
+  if (invalid) return invalid;
+  if (!Number.isInteger(body?.version) || body.version < 1) {
+    return NextResponse.json({ error: 'A version is required' }, { status: 400 });
   }
+
+  const result = await updatePromptVersion(
+    id,
+    body.version,
+    body.text,
+    body.textHtml,
+    body.editNote,
+    token.uid
+  );
+  if (result === null) {
+    return NextResponse.json({ error: 'Prompt or version not found' }, { status: 404 });
+  }
+  if (result === 'unchanged') {
+    return NextResponse.json({ error: 'Nothing changed in that version' }, { status: 409 });
+  }
+  return NextResponse.json({ ...result, prompt: projectPrompt(result.prompt, viewer) });
 });

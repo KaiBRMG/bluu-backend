@@ -179,6 +179,9 @@ async function runStage(stage: OnlyMonsterStage, ctx: LedgerContext): Promise<vo
   }
 }
 
+/** Stages that run once a day (21:01 UTC) only — checks, not data the pages show. */
+const DAILY_STAGES: ReadonlySet<OnlyMonsterStage> = new Set(['reconcile', 'balances']);
+
 /**
  * The stages a run executes. The 21:01 UTC run also reconciles (D5). A
  * continuation runs only what an interrupted run left pending.
@@ -187,7 +190,7 @@ function stagesFor(trigger: string, now: number, pending: OnlyMonsterStage[]): O
   if (trigger === 'continue') return pending;
   // Reconciliation and payout balances run once a day, with the 21:01 run (D5, plan §12).
   const daily = new Date(now).getUTCHours() === RECONCILE_HOUR_UTC;
-  return ONLYMONSTER_STAGES.filter(s => (s !== 'reconcile' && s !== 'balances') || daily);
+  return ONLYMONSTER_STAGES.filter(s => !DAILY_STAGES.has(s) || daily);
 }
 
 /**
@@ -410,7 +413,12 @@ export async function refreshOnlyMonster(uid: string): Promise<OnlyMonsterRefres
 
 export interface OnlyMonsterStatus {
   configured: boolean;
-  /** The oldest `lastSuccessAt` across stages: the age of the least fresh data. */
+  /**
+   * The oldest `lastSuccessAt` across the stages every run makes: the age of the
+   * least fresh data on the pages. The daily checks (reconcile, balances) are left
+   * out — they run only at 21:01 UTC, so including them pinned the label to last
+   * night's run however many refreshes followed.
+   */
   updatedAt: string | null;
   nextRunAt: string;
   lastRunOk: boolean | null;
@@ -431,6 +439,7 @@ export async function getOnlyMonsterStatus(): Promise<OnlyMonsterStatus> {
       lastError: s?.lastError ?? null,
     };
     const ms = s?.lastSuccessAt?.toMillis?.() ?? null;
+    if (DAILY_STAGES.has(stage)) continue;
     oldest = ms === null ? oldest : oldest === null ? ms : Math.min(oldest, ms);
   }
   return {

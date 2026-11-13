@@ -50,8 +50,7 @@ import { useGrowthCategories } from './categoryContext';
  * rule regardless of stylesheet order, which two same-specificity selectors
  * otherwise decide by chance.
  */
-export const SEGMENT_ITEM_CLASS =
-  'text-xs data-[state=on]:bg-[#2563eb]! data-[state=on]:font-medium data-[state=on]:text-white!';
+export { SEGMENT_ITEM_CLASS } from '@/lib/surfaces';
 
 const PLATFORM_MARK: Record<GrowthPlatform, string> = {
   facebook: '/Icons/icons8-facebook.webp',

@@ -10,12 +10,12 @@ import {
   Copy,
   GitCompare,
   Link2,
-  Link2Off,
   MoreHorizontal,
   NotebookPen,
   Pencil,
   RotateCcw,
   Save,
+  Share2,
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -55,6 +55,9 @@ import { MAX_EDIT_NOTE_LENGTH, type PromptVersion } from '@/types/promptLibrary'
 import { LlmMarks } from './LlmMark';
 import { DiffLegend, DiffView } from './DiffView';
 import { EditMetaDialog } from './EditMetaDialog';
+import { AccessCount, SharePromptDialog } from './SharePromptDialog';
+import { copyText } from '@/lib/copyText';
+import { promptShareUrl } from '@/lib/promptShareUrl';
 import { RichPromptEditor, type RichPromptEditorHandle } from '@/components/rich-text/RichPromptEditor';
 import { absoluteDateTime, relativeTime, wordCount } from '../_lib/format';
 
@@ -127,7 +130,7 @@ function PromptDetailBody({
   registerGuard: (fn: (() => boolean) | null) => void;
 }) {
   const {
-    prompts,
+    allPrompts,
     loading,
     refresh,
     getVersions,
@@ -135,13 +138,12 @@ function PromptDetailBody({
     overwriteVersion,
     updateMeta,
     removePrompt,
-    shareLink,
-    revokeShare,
   } = usePromptLibrary();
   const { names } = useUserName();
   const { userData } = useUserData();
 
-  const prompt = useMemo(() => prompts.find(p => p.id === promptId) ?? null, [prompts, promptId]);
+  // The UNFILTERED list: a deep link to a prompt Show-all is hiding must still open.
+  const prompt = useMemo(() => allPrompts.find(p => p.id === promptId) ?? null, [allPrompts, promptId]);
 
   const [versions, setVersions] = useState<PromptVersion[] | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -162,7 +164,7 @@ function PromptDetailBody({
   const [showDiff, setShowDiff] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [sharing, setSharing] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
   const [editingMeta, setEditingMeta] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pendingVersion, setPendingVersion] = useState<number | null>(null);
@@ -183,6 +185,10 @@ function PromptDetailBody({
   // Client-side admin guess: it only decides whether the destructive item is
   // rendered. The route itself requires the admin claim.
   const isAdmin = userData?.groups?.includes('admin') === true;
+
+  // Edit controls are REMOVED for a viewer, not disabled. The server enforces the
+  // same rule on every write; this only decides what is drawn.
+  const canEdit = prompt?.myRole === 'edit';
 
   const headVersion = prompt?.version ?? null;
 
@@ -406,42 +412,18 @@ function PromptDetailBody({
   };
 
   /**
-   * Copies the prompt's public link, minting one on first use.
-   *
-   * The clipboard write happens in the same user gesture wherever possible, but
-   * minting needs a round trip — Chromium (this renderer, by construction)
-   * still honours `writeText` after an await in a click handler, so the link is
-   * written directly rather than through a pre-opened placeholder.
+   * Copies the public link that already exists. Viewers get only this: minting
+   * or withdrawing a link is an editor's act, done from the Share dialog, so
+   * copying never issues a request.
    */
   const copyLink = async () => {
-    if (!prompt || sharing) return;
-    setSharing(true);
-    try {
-      const url = await shareLink(prompt.id);
-      await navigator.clipboard.writeText(url);
+    if (!prompt?.shareId) return;
+    if (await copyText(promptShareUrl(prompt.shareId))) {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 1600);
-      toast.success('Share link copied', {
-        description: prompt.shareId
-          ? 'Anyone with this link can read the prompt.'
-          : 'This prompt is now readable by anyone with the link.',
-      });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not copy the share link');
-    } finally {
-      setSharing(false);
-    }
-  };
-
-  const stopSharing = async () => {
-    if (!prompt) return;
-    try {
-      await revokeShare(prompt.id);
-      toast.success('Sharing stopped', {
-        description: 'The old link no longer works. Sharing again creates a new one.',
-      });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to withdraw the link');
+      toast.success('Link copied');
+    } else {
+      toast.error('Could not copy the link');
     }
   };
 
@@ -481,7 +463,7 @@ function PromptDetailBody({
           <DialogDescription>
             {loading
               ? 'Fetching the prompt library.'
-              : 'It may have been deleted, or created since this library was last loaded.'}
+              : 'It may have been deleted, or it isn’t shared with you.'}
           </DialogDescription>
         </DialogHeader>
         {loading ? (
@@ -525,6 +507,25 @@ function PromptDetailBody({
                     </span>
                   </>
                 )}
+                {/* Role, stated on the face of the card: a viewer should know
+                    before reaching for an edit that is not there, and an admin
+                    reading outside any grant should know they are. */}
+                {prompt.myRole === 'view' && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+                      View only
+                    </span>
+                  </>
+                )}
+                {prompt.viaAdmin && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className="rounded-full bg-white/[0.08] px-2 py-0.5 text-[11px] font-medium text-zinc-300">
+                      Admin access
+                    </span>
+                  </>
+                )}
                 {/* A prompt readable by anyone holding a URL should say so on
                     its face, not only inside a menu. */}
                 {prompt.shareId && (
@@ -549,24 +550,34 @@ function PromptDetailBody({
               {copied ? 'Copied' : 'Copy'}
             </Button>
 
-            {/* Distinct from "Copy", which takes the TEXT. This takes a URL that
-                opens a public read-only page — a different act with a different
-                audience, so it gets its own control rather than a menu item. */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8"
-              onClick={copyLink}
-              disabled={sharing}
-            >
-              {linkCopied ? (
-                <Check className="size-3.5 text-green-400" aria-hidden />
-              ) : (
-                <Link2 className="size-3.5" aria-hidden />
-              )}
-              {linkCopied ? 'Link copied' : 'Copy link'}
-            </Button>
+            {/* Distinct from "Copy", which takes the TEXT. Editors manage who
+                can open the prompt from here; a viewer can only copy a public
+                link that someone has already turned on. */}
+            {canEdit ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-2"
+                onClick={() => setSharingOpen(true)}
+              >
+                <Share2 className="size-3.5" aria-hidden />
+                Share
+                <AccessCount prompt={prompt} />
+              </Button>
+            ) : (
+              prompt.shareId && (
+                <Button variant="outline" size="sm" className="h-8" onClick={copyLink}>
+                  {linkCopied ? (
+                    <Check className="size-3.5 text-green-400" aria-hidden />
+                  ) : (
+                    <Link2 className="size-3.5" aria-hidden />
+                  )}
+                  {linkCopied ? 'Link copied' : 'Copy link'}
+                </Button>
+              )
+            )}
 
+            {canEdit && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon-sm" aria-label="Prompt actions">
@@ -578,12 +589,6 @@ function PromptDetailBody({
                   <Pencil className="size-4" aria-hidden />
                   Edit details
                 </DropdownMenuItem>
-                {prompt.shareId && (
-                  <DropdownMenuItem onSelect={stopSharing}>
-                    <Link2Off className="size-4" aria-hidden />
-                    Stop sharing
-                  </DropdownMenuItem>
-                )}
                 <DropdownMenuItem onSelect={toggleArchive}>
                   {prompt.isArchived ? (
                     <ArchiveRestore className="size-4" aria-hidden />
@@ -603,6 +608,7 @@ function PromptDetailBody({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
 
             <Button variant="ghost" size="sm" className="h-8" onClick={requestClose}>
               Close
@@ -774,6 +780,7 @@ function PromptDetailBody({
               initialHtml={promptBodyHtml(current.text, current.textHtml)}
               onChange={handleEditorChange}
               toolbarHost={toolbarHost}
+              readOnly={!canEdit}
             />
           )
         )}
@@ -874,6 +881,16 @@ function PromptDetailBody({
       )}
 
       <EditMetaDialog prompt={prompt} open={editingMeta} onOpenChange={setEditingMeta} />
+      {/* Mounted only while open: it holds the staff directory and a picker, and
+          this body re-renders on every keystroke in the editor. */}
+      {canEdit && sharingOpen && (
+        <SharePromptDialog
+          prompt={prompt}
+          open
+          onOpenChange={setSharingOpen}
+          onLostAccess={forceClose}
+        />
+      )}
 
       <AlertDialog
         open={pendingVersion !== null}
