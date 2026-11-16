@@ -23,7 +23,10 @@ This file guides Claude Code (claude.ai/code) when working in this repository. I
                                                                         TELEGRAM IS THE ONLY WAY IN — there
                                                                         is no /creator/login and no PWA
                                                                         install; mobile nav is a bottom tab
-                                                                        bar — see DESIGN.md §7
+                                                                        bar — see DESIGN.md §7. AI CREATORS
+                                                                        (isAiCreator) never sign in at all —
+                                                                        sales-import-only accounts; see
+                                                                        ca-salary.md
                     ┌───────────────────────────────────────────────┐
  System browser  ─►│  Model application /model-submissions         │─► UNAUTHENTICATED (session token
  (public)           └───────────────────────────────────────────────┘   + rate limit + sharp validation)

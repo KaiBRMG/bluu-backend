@@ -207,9 +207,7 @@ export function resolveSnipSource(value: unknown): SnipSource {
  *
  * Deliberately no SVG: an SVG is a script-bearing document, and the image route
  * hands out a signed URL on `storage.googleapis.com` that a browser will happily
- * execute it from. There is no video here either — Import is stills only; a
- * recording has a durable queue, a poster and a resumable session behind it, and
- * none of that applies to a file the user already has on disk.
+ * execute it from. Videos have their own list below.
  */
 export const SNIP_IMPORT_TYPES: Readonly<Record<string, string>> = {
   'image/png': 'png',
@@ -218,17 +216,53 @@ export const SNIP_IMPORT_TYPES: Readonly<Record<string, string>> = {
   'image/gif': 'gif',
 };
 
+/**
+ * The video types Import accepts — the same allowlist discipline as the images
+ * above (the signature pins whatever type it is handed, so it is looked up, never
+ * passed through).
+ *
+ * The three containers a browser can actually play: MP4 (what phones and most
+ * editors export), WebM (what the recorder itself makes) and QuickTime (what
+ * macOS's own screen recorder and iPhones produce). **The container is not the
+ * whole story** — a `.mov` holding HEVC will not decode in every browser — which
+ * is why the import dialog proves the file plays by loading its metadata in a
+ * `<video>` before it uploads anything, rather than trusting the extension.
+ */
+export const SNIP_VIDEO_IMPORT_TYPES: Readonly<Record<string, string>> = {
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+};
+
 /** For the file picker's `accept`, and for the drop zone's own check. */
-export const SNIP_IMPORT_ACCEPT = Object.keys(SNIP_IMPORT_TYPES).join(',');
+export const SNIP_IMPORT_ACCEPT = [
+  ...Object.keys(SNIP_IMPORT_TYPES),
+  ...Object.keys(SNIP_VIDEO_IMPORT_TYPES),
+].join(',');
 
 export function isSnipImportType(value: unknown): value is string {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SNIP_IMPORT_TYPES, value);
 }
 
-/** `image/jpeg` → `jpg`. PNG for anything unrecognised, which cannot happen
- *  behind `isSnipImportType` but keeps the path total. */
+export function isSnipVideoImportType(value: unknown): value is string {
+  return (
+    typeof value === 'string' && Object.prototype.hasOwnProperty.call(SNIP_VIDEO_IMPORT_TYPES, value)
+  );
+}
+
+/** Which kind of snip an import of this content type becomes, or `null` if it
+ *  is neither allowlist. The one place that decision is made. */
+export function snipImportKind(contentType: unknown): SnipKind | null {
+  if (isSnipImportType(contentType)) return 'image';
+  if (isSnipVideoImportType(contentType)) return 'video';
+  return null;
+}
+
+/** `image/jpeg` → `jpg`, `video/quicktime` → `mov`. PNG for anything
+ *  unrecognised, which cannot happen behind `snipImportKind` but keeps the path
+ *  total. */
 export function snipImportExtension(contentType: string): string {
-  return SNIP_IMPORT_TYPES[contentType] ?? 'png';
+  return SNIP_IMPORT_TYPES[contentType] ?? SNIP_VIDEO_IMPORT_TYPES[contentType] ?? 'png';
 }
 
 // ─── Title & description ─────────────────────────────────────────────
@@ -397,6 +431,29 @@ export const MAX_SNIP_BYTES = 25 * 1024 * 1024;
  * index stores cluster offsets as 32-bit integers.
  */
 export const MAX_SNIP_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+
+/**
+ * The ceiling on one **imported** video — a quarter of a recording's.
+ *
+ * Lower because the two travel differently. A recording is moved by the main
+ * process as a *resumable* session that continues from the bucket's confirmed
+ * offset after a dropped connection; an import is a single browser `PUT`, which
+ * an interruption restarts from zero. Half a gigabyte is a long, ordinary clip —
+ * about an hour at the recorder's own average bitrate — while still being a
+ * transfer a normal connection finishes. An import's duration is capped by
+ * `MAX_SNIP_RECORDING_MS`, the same hour a recording gets, so the two limits
+ * describe the same file.
+ *
+ * Enforced three times: the dialog (so the user is told before an upload), the
+ * slot reservation (so a signature is never issued for more) and `finalizeSnip`
+ * (which reads the real size, because a signed `PUT` cannot pin a length).
+ */
+export const MAX_SNIP_IMPORT_VIDEO_BYTES = 500 * 1024 * 1024;
+
+/** The byte ceiling for one imported file of `kind`. */
+export function snipImportMaxBytes(kind: SnipKind): number {
+  return kind === 'video' ? MAX_SNIP_IMPORT_VIDEO_BYTES : MAX_SNIP_BYTES;
+}
 
 /**
  * The hard stop on a recording, enforced in the recorder window itself.

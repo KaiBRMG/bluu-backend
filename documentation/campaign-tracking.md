@@ -14,6 +14,7 @@
 | API: `src/app/api/campaign-tracking/[id]/transfer/route.ts` | Reassign `createdBy` + notify |
 | API: `src/app/api/campaign-tracking/[id]/creator-complete/route.ts` | Creator-side completion |
 | Pages | `ca-portal/custom-requests`, `ca-portal/campaigns`, `creators/custom-requests` |
+| Creator list | `useContentCreators()` — **AI creators (`isAiCreator`) are excluded**, and `campaign-tracking/create` refuses one server-side ([ca-salary.md](ca-salary.md#ai-creators--accounts-with-nobody-behind-them)) |
 
 ## Firestore
 

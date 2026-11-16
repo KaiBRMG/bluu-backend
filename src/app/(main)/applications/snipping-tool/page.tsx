@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { auth } from '@/firebase-config';
 import { useUserData } from '@/hooks/useUserData';
 import { useViewerTimezone } from '@/hooks/useViewerTimezone';
+import { getDayBoundsUTC } from '@/lib/utils/timezone';
 import { copyText } from '@/lib/copyText';
 import {
   SNIP_MIC_MIN_APP_VERSION,
@@ -19,13 +20,14 @@ import {
   snipExpiryLabel,
   snipRetentionLabel,
 } from '@/lib/snips';
-import { importSnip } from '@/lib/snipUpload';
+import { importSnip, type SnipImportMeta } from '@/lib/snipUpload';
 import { meetsMinVersion } from '@/lib/appVersion';
 import { useAppVersion } from '@/hooks/useAppVersion';
 import type { SnipPage, SnipRow } from '@/types/snips';
 import { PendingUploads } from './_components/PendingUploads';
 import { SnipCard } from './_components/SnipCard';
 import { SnipDetailsDialog } from './_components/SnipDetailsDialog';
+import { SnipDateRangeFilter, snipRangeLabel, type SnipDayRange } from './_components/SnipDateRangeFilter';
 import { SnipImportDialog } from './_components/SnipImportDialog';
 import { SnipSettingsPopover } from './_components/SnipSettingsPopover';
 
@@ -94,6 +96,9 @@ export default function SnippingToolPage() {
   // mounted per card, which on a 24-cell page would be 24 `Dialog` portals for
   // a surface at most one of them ever opens.
   const [editing, setEditing] = useState<SnipRow | null>(null);
+  // The date filter, as calendar days in the viewer's zone. Null = the whole
+  // library. Resolved to UTC instants below, where the request is built.
+  const [dayRange, setDayRange] = useState<SnipDayRange | null>(null);
   // Seeded from the user agent rather than defaulting to `other`: the IPC answer
   // arrives a tick later, and until it does a Mac would render the shortcut as
   // "Ctrl + Shift + S" in the page's own description — wrong, and prominent.
@@ -113,6 +118,22 @@ export default function SnippingToolPage() {
   const settings = useMemo(
     () => resolveSnipSettings(userData?.snipSettings),
     [userData?.snipSettings],
+  );
+
+  // The filter as the server understands it: inclusive UTC bounds. Two numbers
+  // (not an object) so everything downstream can depend on them by value — an
+  // object rebuilt each render would refetch the library on every one.
+  const fromMs = dayRange ? getDayBoundsUTC(dayRange.from, timezone).start : null;
+  const toMs = dayRange ? getDayBoundsUTC(dayRange.to, timezone).end : null;
+
+  /** Whether a row created just now belongs in the grid under the current filter. */
+  const inRange = useCallback(
+    (snip: SnipRow) => {
+      if (fromMs === null || toMs === null) return true;
+      const ms = Date.parse(snip.createdAt);
+      return ms >= fromMs && ms <= toMs;
+    },
+    [fromMs, toMs],
   );
 
   useEffect(() => {
@@ -140,7 +161,14 @@ export default function SnippingToolPage() {
     try {
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) throw new Error('Session expired — sign in again.');
-      const url = from ? `/api/snips?cursor=${encodeURIComponent(from)}` : '/api/snips';
+      const params = new URLSearchParams();
+      if (from) params.set('cursor', from);
+      if (fromMs !== null && toMs !== null) {
+        params.set('from', String(fromMs));
+        params.set('to', String(toMs));
+      }
+      const query = params.toString();
+      const url = query ? `/api/snips?${query}` : '/api/snips';
       const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
       if (!res.ok) throw new Error(from ? 'Could not load more snips' : 'Could not load your snips');
       const page = (await res.json()) as SnipPage;
@@ -176,7 +204,7 @@ export default function SnippingToolPage() {
         setLoadingMore(false);
       }
     }
-  }, []);
+  }, [fromMs, toMs]);
 
   const load = useCallback(() => loadPage(null), [loadPage]);
 
@@ -205,13 +233,29 @@ export default function SnippingToolPage() {
     return () => observer.disconnect();
   }, [canLoadMore, cursor, loadPage]);
 
+  /**
+   * Changing the filter starts the list over. The rows on screen belong to the
+   * previous filter, so they go (back to the skeleton) rather than lingering
+   * under a label that no longer describes them; the load effect below refetches
+   * because `loadPage` changes with the bounds.
+   */
+  const changeRange = useCallback((next: SnipDayRange | null) => {
+    setDayRange(next);
+    setSnips(null);
+    setCursor(null);
+    setTotal(null);
+    setError(null);
+  }, []);
+
   // A capture taken while this page is open belongs at the top of it
   // immediately. `SnipController` owns the upload wherever the user is, so it
   // announces the result rather than this page polling for it.
   useEffect(() => {
     const onCreated = (event: Event) => {
       const snip = (event as CustomEvent<SnipRow>).detail;
-      if (!snip?.id) return;
+      // Outside the active range it is not part of this view — it will be there
+      // when the filter is cleared.
+      if (!snip?.id || !inRange(snip)) return;
       setSnips(prev => {
         if (!prev) return [snip];
         const existing = prev.filter(s => s.id !== snip.id);
@@ -221,7 +265,7 @@ export default function SnippingToolPage() {
     };
     window.addEventListener('bluu:snip-created', onCreated);
     return () => window.removeEventListener('bluu:snip-created', onCreated);
-  }, []);
+  }, [inRange]);
 
   const startCapture = useCallback(async () => {
     const api = window.electronAPI?.snip;
@@ -306,7 +350,7 @@ export default function SnippingToolPage() {
   );
 
   /**
-   * Import — an image the user already has, given the same treatment as a
+   * Import — an image or video the user already has, given the same treatment as a
    * capture: a reservation, a share token, a retention stamp and a card.
    *
    * The new row is prepended rather than the list reloaded, exactly as a fresh
@@ -320,18 +364,20 @@ export default function SnippingToolPage() {
   const handleImport = useCallback(
     async (
       file: File,
-      dimensions: { width: number; height: number },
+      meta: SnipImportMeta,
       onProgress?: (fraction: number) => void,
     ) => {
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) throw new Error('Session expired — sign in again.');
-      const snip = await importSnip(idToken, file, dimensions, onProgress);
+      const snip = await importSnip(idToken, file, meta, onProgress);
 
-      setSnips(prev => (prev ? [snip, ...prev] : [snip]));
-      setTotal(t => (t === null ? t : t + 1));
+      if (inRange(snip)) {
+        setSnips(prev => (prev ? [snip, ...prev] : [snip]));
+        setTotal(t => (t === null ? t : t + 1));
+      }
       return snip;
     },
-    [],
+    [inRange],
   );
 
   const handleImported = useCallback(
@@ -344,9 +390,15 @@ export default function SnippingToolPage() {
         ? await copyText(imported.map(s => s.shareUrl).join('\n'))
         : false;
 
+      // Named for what actually landed: a batch can mix stills and recordings.
+      const noun = imported.every(s => s.kind === 'video')
+        ? 'video'
+        : imported.every(s => s.kind === 'image')
+          ? 'image'
+          : 'file';
       if (imported.length === 1) {
         const [snip] = imported;
-        toast.success(copied ? 'Imported — link copied' : 'Image imported', {
+        toast.success(copied ? 'Imported — link copied' : `${noun[0].toUpperCase()}${noun.slice(1)} imported`, {
           description: copied
             ? snip.expiresAt
               ? snipExpiryLabel(snip.expiresAt)
@@ -357,8 +409,8 @@ export default function SnippingToolPage() {
       }
       toast.success(
         copied
-          ? `${imported.length} images imported — links copied`
-          : `${imported.length} images imported`,
+          ? `${imported.length} ${noun}s imported — links copied`
+          : `${imported.length} ${noun}s imported`,
         {
           description: copied
             ? 'One link per line, in the order they were imported.'
@@ -521,6 +573,18 @@ export default function SnippingToolPage() {
           <PendingUploads timezone={timezone} />
         </div>
 
+        {/* Only for a library worth filtering: an empty one has nothing to
+            narrow, and the control would be a promise with nothing behind it.
+            While the first page loads it holds its place as a skeleton so the
+            grid does not shift when it arrives. */}
+        {dayRange || (snips !== null && snips.length > 0) ? (
+          <div className="mt-6">
+            <SnipDateRangeFilter value={dayRange} onChange={changeRange} timezone={timezone} />
+          </div>
+        ) : snips === null ? (
+          <Skeleton className="mt-6 h-8 w-20 rounded-md" />
+        ) : null}
+
         <div className="mt-6">
           {snips === null ? (
             // Shaped to the grid it becomes, so nothing jumps when the rows land.
@@ -533,6 +597,21 @@ export default function SnippingToolPage() {
             <div className="flex flex-col items-start gap-2">
               <p className="text-sm text-zinc-400">{error}</p>
               <Button variant="outline" size="sm" onClick={load}>Try again</Button>
+            </div>
+          ) : snips.length === 0 && dayRange ? (
+            // A filtered-empty state gets its own way out (DESIGN.md): the
+            // library is not empty, the filter just matches nothing.
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm text-zinc-400">
+                No snips from{' '}
+                <span className="tabular-nums text-zinc-300">
+                  {snipRangeLabel(dayRange, timezone)}
+                </span>
+                .
+              </p>
+              <Button variant="outline" size="sm" onClick={() => changeRange(null)}>
+                Clear filter
+              </Button>
             </div>
           ) : snips.length === 0 ? (
             // One quiet line, no box — and it names the way out of the state
@@ -607,6 +686,7 @@ export default function SnippingToolPage() {
                       <>
                         <span className="tabular-nums">{total ?? snips.length}</span>
                         {(total ?? snips.length) === 1 ? ' snip' : ' snips'}
+                        {dayRange && ' in this range'}
                       </>
                     )}
                   </span>

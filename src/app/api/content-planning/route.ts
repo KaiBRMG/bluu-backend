@@ -31,6 +31,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (!creatorSnap.exists) {
       return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
     }
+    if (creatorSnap.get('isAiCreator') === true) {
+      return NextResponse.json({ error: 'AI creators do not have content plans' }, { status: 400 });
+    }
 
     const ref = adminDb.collection('content-planning').doc();
     await ref.set({

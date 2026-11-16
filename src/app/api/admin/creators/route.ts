@@ -112,6 +112,12 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
  * out of the email namespace staff now share, so there is no employee/creator
  * address collision to arbitrate. Older creators still carry the email/password
  * from the password era; those are inert (no `tg` claim — auth.md).
+ *
+ * `isAiCreator: true` creates an account with no person behind it, there only
+ * so its OnlyMonster sales import. Its Auth account is still created — a creator
+ * id is an auth uid, and that disjoint id space is what lets `shifts.creatorIds`
+ * hold creators and sub-accounts side by side (rule 9h) — but **disabled**, and
+ * the Telegram mint and `withCreatorAuth` both refuse it, so it can never sign in.
  */
 export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -121,6 +127,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
     const body = await request.json();
     const { stageName, OFID, platform, driveLink = '', defaultTimezone = '' } = body;
+    // Strictly `true`: anything else (absent, "true", 1) is a real creator.
+    const isAiCreator = body.isAiCreator === true;
 
     if (!stageName || !OFID) {
       return NextResponse.json({ error: 'stageName and OFID are required' }, { status: 400 });
@@ -130,7 +138,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const parsedPlatform = parsePlatformField(platform);
     if (!parsedPlatform.ok) return NextResponse.json({ error: parsedPlatform.error }, { status: 400 });
 
-    const { uid } = await adminAuth.createUser({ displayName: stageName });
+    const { uid } = await adminAuth.createUser({ displayName: stageName, disabled: isAiCreator });
 
     // Write Firestore doc
     await adminDb.collection('creators').doc(uid).set({
@@ -145,6 +153,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       ...(parsedPlatform.value ? { platform: parsedPlatform.value } : {}),
       isActive: true,
       isArchived: false,
+      ...(isAiCreator ? { isAiCreator: true } : {}),
       driveLink: driveLink || '',
       defaultTimezone: defaultTimezone || '',
       lastCRID: 0,

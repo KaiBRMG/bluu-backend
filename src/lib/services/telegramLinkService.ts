@@ -118,6 +118,11 @@ export async function mintTelegramLinkToken(params: {
   const subjectRef = adminDb.collection(COLLECTION_FOR[subjectKind]).doc(subjectUid);
   const subjectSnap = await subjectRef.get();
   if (!subjectSnap.exists) throw new Error('SUBJECT_NOT_FOUND');
+  // An AI creator has no person behind it and no way into the portal. Refused
+  // here rather than in the route so no caller can hand one a link.
+  if (subjectKind === 'creator' && subjectSnap.get('isAiCreator') === true) {
+    throw new Error('SUBJECT_IS_AI_CREATOR');
+  }
 
   // 32 bytes → 43 base64url characters, inside Telegram's 64-character
   // `start` payload limit and its restricted alphabet. See telegramConfig.ts.

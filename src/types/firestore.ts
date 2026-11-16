@@ -1084,6 +1084,18 @@ export interface CreatorFullDocument {
   platform?: AccountPlatform;
   isActive: boolean;
   isArchived: boolean;
+  /**
+   * An account chat agents work that has no real person behind it (an AI
+   * persona run on OnlyMonster). It exists **only so its sales import** and are
+   * credited to the agent on shift, and so it shows on OnlyFans Analytics.
+   *
+   * Set at create time only and never changed. An AI creator has **no way in**:
+   * its Auth account is created disabled, no Telegram link can be minted for it
+   * and `withCreatorAuth` refuses it. It is left out of Custom Requests,
+   * Campaigns, Content Planning and creator broadcasts. It **is** an assignable
+   * account for shifts and pay, like any other (rule 9h).
+   */
+  isAiCreator?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   driveLink?: string;

@@ -37,7 +37,9 @@ import type { Creator } from '@/lib/campaignTracking';
  */
 
 // v3: the cached list now includes archived accounts.
-const CACHE_KEY = 'bluu_creators_v3';
+// v4: rows carry `isAiCreator` — a v3 entry would offer AI creators to the
+// content pickers until it expired.
+const CACHE_KEY = 'bluu_creators_v4';
 const TTL = 5 * 60 * 1000;
 
 /** Stable empty snapshot. A new `[]` per call would spin `useSyncExternalStore`. */
@@ -176,7 +178,27 @@ function getCreatorsOnly(): Creator[] {
   return creatorsOnly;
 }
 
+/** Derived real-creators-only view (no sub-accounts, no AI creators). */
+let contentCreatorsSource: Creator[] = EMPTY;
+let contentCreators: Creator[] = EMPTY;
+
+/**
+ * {@link getCreatorsOnly} without AI creators — the accounts a custom request,
+ * campaign or content plan can be raised against. Identity-cached for the same
+ * reason as the views above.
+ */
+function getContentCreators(): Creator[] {
+  const source = getCreatorsOnly();
+  if (contentCreatorsSource !== source) {
+    contentCreatorsSource = source;
+    const filtered = source.filter(c => c.isAiCreator !== true);
+    contentCreators = filtered.length === source.length ? source : filtered;
+  }
+  return contentCreators;
+}
+
 const getActiveSnapshot = () => getActive();
+const getContentCreatorsSnapshot = () => getContentCreators();
 const getCreatorsOnlySnapshot = () => getCreatorsOnly();
 const getIndexSnapshot = () => getIndex();
 /** SSR: a stable empty index, for the same reason as the empty list. */
@@ -202,6 +224,27 @@ export function useCreators(): Creator[] {
   // first: `ensureLoaded` returns immediately when the snapshot is fresh or a
   // request is already out. It never sets state synchronously — the store
   // updates from the resolved promise.
+  useEffect(() => {
+    if (user) ensureLoaded(() => user.getIdToken());
+  }, [user]);
+
+  return creators;
+}
+
+/**
+ * Active **real** creators — {@link useCreators} without AI creators.
+ *
+ * For Custom Requests, Campaigns and Content Planning: an AI creator has no
+ * person behind it to fulfil a request or post content, and exists only so its
+ * sales import. Everything that is about the account's *sales* — OnlyFans
+ * Analytics, the creator combobox on sales/fans/disputes, shift assignment —
+ * keeps using the broader views, where AI creators belong.
+ */
+export function useContentCreators(): Creator[] {
+  const { user } = useAuth();
+
+  const creators = useSyncExternalStore(subscribe, getContentCreatorsSnapshot, getServerSnapshot);
+
   useEffect(() => {
     if (user) ensureLoaded(() => user.getIdToken());
   }, [user]);

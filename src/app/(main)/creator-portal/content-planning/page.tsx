@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
-import { useCreators } from "@/hooks/useCreators";
+import { useContentCreators } from "@/hooks/useCreators";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -1129,7 +1129,7 @@ function OverviewTab({ creators, isActive }: { creators: Creator[]; isActive: bo
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ContentPlanningPage() {
-  const creators = useCreators();
+  const creators = useContentCreators();
   const [activeTab, setActiveTab] = useState("overview");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));
 

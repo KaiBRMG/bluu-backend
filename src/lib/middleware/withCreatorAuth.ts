@@ -77,6 +77,11 @@ export function withCreatorAuth(handler: Function) {
     if (creatorDoc.data()?.isActive === false) {
       return NextResponse.json({ error: 'Account is inactive' }, { status: 403 });
     }
+    // An AI creator has no person behind it; its Auth account is disabled and
+    // it can never be handed a Telegram link. This is the last of those locks.
+    if (creatorDoc.data()?.isAiCreator === true) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
 
     return context !== undefined
       ? handler(req, token, context.params)

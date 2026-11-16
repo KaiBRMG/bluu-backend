@@ -217,6 +217,13 @@ export interface Creator {
    * these — history must still name them; pickers never offer them.
    */
   isArchived?: boolean;
+  /**
+   * An account with no real person behind it, there only so its sales import.
+   * Present on OnlyFans Analytics, sales, disputes and shift assignment like any
+   * other account; left out of Custom Requests, Campaigns and Content Planning
+   * via `useContentCreators()`. Absent means a real creator.
+   */
+  isAiCreator?: boolean;
 }
 
 export const TYPE_LABELS: Record<CRType, string> = {

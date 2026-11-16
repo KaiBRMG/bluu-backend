@@ -9,9 +9,21 @@ import {
   SNIP_PAGE_SIZE,
 } from '@/lib/services/snipService';
 
+/** An absent bound is `null`; a present one must be a positive integer of ms. */
+function parseBound(raw: string | null): number | null | 'invalid' {
+  if (raw === null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n > 0 ? n : 'invalid';
+}
+
 /**
- * GET /api/snips?limit=24&cursor=<opaque> — one page of the caller's own snips,
- * newest first, plus the cursor for the next one.
+ * GET /api/snips?limit=24&cursor=<opaque>&from=<ms>&to=<ms> — one page of the
+ * caller's own snips, newest first, plus the cursor for the next one.
+ *
+ * `from` / `to` are optional inclusive bounds on the creation time, in UTC epoch
+ * milliseconds. Malformed or inverted bounds are a **400**, not ignored: a
+ * filter that silently falls away would present the whole library as though it
+ * were the filtered result. Served by the existing composite index.
  *
  * **Paged, not whole** (rule 9i). The full library is up to five hundred rows,
  * and each row's preview is a further origin request, so shipping the lot to
@@ -31,9 +43,16 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
   try {
     const { searchParams } = new URL(request.url);
     const limitRaw = Number(searchParams.get('limit'));
+    const from = parseBound(searchParams.get('from'));
+    const to = parseBound(searchParams.get('to'));
+    if (from === 'invalid' || to === 'invalid' || (from !== null && to !== null && from > to)) {
+      return NextResponse.json({ error: 'Invalid date range' }, { status: 400 });
+    }
     const page = await listSnipPage(token.uid, {
       limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : SNIP_PAGE_SIZE,
       cursor: searchParams.get('cursor'),
+      from,
+      to,
     });
     return NextResponse.json(page, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {

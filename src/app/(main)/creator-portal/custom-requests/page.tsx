@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
-import { useCreators } from "@/hooks/useCreators";
+import { useContentCreators } from "@/hooks/useCreators";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -2197,7 +2197,7 @@ type Selection =
 const NONE_VALUE = "__none__";
 
 export default function ManagerCustomRequestsPage() {
-  const creators = useCreators();
+  const creators = useContentCreators();
   const { names: userNames } = useUserName();
   const { users: basicUsers } = useBasicUsers();
   const [selection, setSelection] = useState<Selection>({ kind: "overview" });

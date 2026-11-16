@@ -20,8 +20,9 @@
 | `src/lib/services/snipService.ts` | Everything server-side: tokens, slots, projections, retention, the sweep |
 | `src/app/(main)/applications/snipping-tool/` | The library page + settings popover + shortcut recorder |
 | `src/app/(main)/applications/snipping-tool/_components/SnipDetailsDialog.tsx` | Title + description, written after the fact |
+| `src/app/(main)/applications/snipping-tool/_components/SnipDateRangeFilter.tsx` | The library's **date-range filter** — popover with presets and a range calendar |
 | `src/app/(main)/applications/snipping-tool/_components/SnipMicrophoneField.tsx` | The microphone's **permission** state and the way to fix it |
-| `src/app/(main)/applications/snipping-tool/_components/SnipImportDialog.tsx` | **Import** — an image from disk, given a share link |
+| `src/app/(main)/applications/snipping-tool/_components/SnipImportDialog.tsx` | **Import** — an image or video from disk, given a share link |
 | `src/lib/snipSounds.ts` | The shutter and the recording cue. Played by the renderer; main has no audio |
 | `src/app/s/_components/SnipVideo.tsx` | The public **player** — own controls, because the file states no duration |
 | `src/app/s/[shareId]/` | The **public** page |
@@ -39,7 +40,7 @@
 
 ## Storage
 
-- `snips/{shareId}.png` — a still, written by a v4 signed URL from the renderer, read by a v4 signed URL through the image route. An **imported** still keeps its own type and extension (`.jpg`, `.webp`, `.gif`) from the `SNIP_IMPORT_TYPES` allowlist; every read and delete resolves `storagePath` off the document, so nothing downstream had to learn about it.
+- `snips/{shareId}.png` — a still, written by a v4 signed URL from the renderer, read by a v4 signed URL through the image route. An **imported** still keeps its own type and extension (`.jpg`, `.webp`, `.gif`) from the `SNIP_IMPORT_TYPES` allowlist, and an **imported video** keeps its own (`.mp4`, `.webm`, `.mov`) from `SNIP_VIDEO_IMPORT_TYPES`; every read and delete resolves `storagePath` off the document, so nothing downstream had to learn about it.
 - `snips/{shareId}.webm` — a recording, written by a v4 signed URL **from the main process** (see below), read through the video route.
 - `snips/{shareId}-poster.png` — a recording's poster frame. Derived from the id rather than given one of its own, so it shares the row's lifetime exactly and cannot be orphaned by a path that no longer matches.
 
@@ -731,14 +732,25 @@ A capture completes without asking the user anything — that is the point of th
 
 ## Import
 
-An image the user already has, given everything a capture gets: a share token, a public page, their retention window, the quota, a card. That is the point of the feature — the *link*, not the file — and it is why an import goes through the **same** reservation rather than a second kind of row. Nothing downstream needed to learn about it.
+An image or video the user already has, given everything a capture gets: a share token, a public page, their retention window, the quota, a card. That is the point of the feature — the *link*, not the file — and it is why an import goes through the **same** reservation rather than a second kind of row. Nothing downstream needed to learn about it.
 
 Two things travel in leg one that a capture never sends: `source: 'import'` (which the card's badge reads back) and `contentType`.
 
 - **The content type is an allowlist lookup, never a passthrough.** `SNIP_IMPORT_TYPES` is PNG / JPEG / WebP / GIF. The v4 signature pins whatever it is told and the public image route 302s a browser straight at the object, so a free-text value here would be a way to have us sign a slot for `text/html` on our own bucket. **Deliberately no SVG** for the same reason: an SVG is a script-bearing document served from a `storage.googleapis.com` origin.
 - **Dimensions are read in the browser** (`readImageSize`, `createImageBitmap` with an `<img>` fallback), because nothing downstream can — the server never sees the bytes, and probing the object would mean pulling it back through a function. A file that will not decode is **refused** rather than finalised with zeros: `width`/`height` are what reserve the picture's shape on the public page.
 - **The filename becomes the title**, passed to `finalizeSnip` and normalised there. The file already has a name and it is the only thing about the snip the user has written.
-- **Stills only.** A recording carries a durable on-disk queue, a poster frame and a resumable session, none of which mean anything for a file already on disk — and a video import would have to answer "how long is it?" with no recorder's wall clock to ask.
+- **Videos are imported too, with their own limits.** `SNIP_VIDEO_IMPORT_TYPES` is MP4 / WebM / QuickTime (`video/quicktime`, what macOS's own screen recorder and iPhones make); same allowlist rule as the images, and `snipImportKind(contentType)` is the one place a type becomes a kind. The reservation refuses a type that does not match the `kind` it names. Limits:
+
+  | | Limit | Why |
+  |---|---|---|
+  | Size | `MAX_SNIP_IMPORT_VIDEO_BYTES` = **500 MB** (recordings: 2 GB) | An import is **one plain browser `PUT`**, not the resumable session main drives for a recording — an interruption restarts from zero, so the ceiling is one a normal connection finishes. Checked in the dialog, at the reservation, and again in `finalizeSnip` against the object's **real** size (a signed `PUT` cannot pin a length), keyed off `source: 'import'` on the row |
+  | Length | `MAX_SNIP_RECORDING_MS` = **1 hour**, the recording cap | Read from the element's metadata and refused in the dialog; `finalizeSnip` still clamps, as for a recording |
+  | Count | the same 500-snip quota | Unchanged |
+
+  There is **no per-user byte quota** — only the snip count — so the worst case is 500 × 500 MB, the same shape as recordings' 500 × 2 GB. Retention is what bounds it in practice.
+- **The browser does what the recorder did.** `readVideoMeta` loads the file's metadata in a `<video>` for the dimensions and duration, then seeks to a quarter of the way in (capped at 1 s — frame zero is often black) and draws a poster onto a canvas (≤1280 px long edge, PNG). **That load is also the "will it play?" test**: a `.mov` whose codec the browser cannot decode errors or reports 0×0 and is refused *before* any bytes move. The container is not the whole story — an HEVC `.mov` is the realistic failure. The object URL is revoked and the element detached on every exit; a 500 MB blob URL pinned for weeks (rule 9c) is the leak to avoid.
+- **The poster is best-effort, like a recording's.** The reservation signs the poster slot beside the video's; the page PUTs it after the video succeeds. A failure is swallowed and `finalizeSnip` drops `posterPath`, so the card shows its placeholder and the import still lands.
+- **Why `resumable` is false for an import.** `createSnipUploadSlot` signs a `resumable` initiation URL for a recording; its `POST` returns the session in a `Location` header, which a cross-origin page cannot read. An imported video gets a plain signed `write` URL, and the response says `resumable: false`. No new bridge, no Electron change — **ships on a plain Vercel deploy** (it needs the existing bucket CORS policy and nothing else).
 - **Several files per import, uploaded sequentially.** Picker (`multiple`) and drop both take every file. Each is validated up front, then run through the same three legs **one at a time** — so the readout ("Uploading 2 of 5… 40%") describes one real transfer, and a full quota (`409` → `SnipQuotaFullError`) stops the batch instead of racing every remaining file into the same refusal. A failed file does not stop the rest; the dialog stays open listing each failure by name and closes itself only when everything landed. The page gets **one** `onImported(snips)` per batch — one toast, and with auto-copy on, one clipboard write holding every link, one per line.
 - **The drop target exists once, on `DialogContent`.** A second `onDrop` on the inner dashed button fired `handle` twice via bubbling and imported every file dropped on the box twice. An `inFlightRef` backs this up — `busy` is state, so two calls in the same event both read it as false.
 - The badge is the **attribute chip** recipe (greyscale, `rounded-md`, DESIGN.md §5) — an attribute the row carries, not a state it is in. It answers the one question a mixed grid raises and nothing more, which is also why `source` is **not** in the public projection: how a file reached the library is the owner's business.
@@ -829,6 +841,21 @@ The cursor is `{createdAt ms}.{document id}`, and **both halves matter**. The id
 Ordering and filters are unchanged from the unpaged query, so the cursor rides the **existing** composite index (`ownerUid`, `status`, `createdAt desc`) — paging added no index and nothing to deploy.
 
 On the page, the sentinel and the "Load more" button are **the same element**: scrolling loads the next page 600px early through an `IntersectionObserver`, and a user who tabs (or a browser without the observer) gets a real control rather than a dead marker. A next-page fetch stands down while one is in flight; a *reload* preempts instead, guarded by a sequence stamp so the abandoned response cannot land on top of the newer one.
+
+### The date filter is server-side, and it is a range on `createdAt`
+
+`GET /api/snips` takes optional `from` / `to` — **inclusive UTC epoch milliseconds** on `createdAt`. It has to be server-side: the library is paged 24 at a time, so filtering the loaded rows would hide matches that simply have not been fetched yet. The count (`total`, first page only) carries the same range, so the line reads "24 of 9 in this range" correctly. Malformed or inverted bounds are a **400**, never ignored — a filter that silently fell away would show the whole library under a label saying it was narrowed.
+
+**No new index.** A range on `createdAt` alongside `ownerUid ==` and `status ==` ordered by `createdAt desc` is served by the existing composite index, and the cursor rides the same ordering.
+
+**Days are the viewer's days.** The picker holds `YYYY-MM-DD` strings in the viewer's timezone — the zone every card renders its date in — and the page resolves them with `getDayBoundsUTC` when it builds the request, so the server never learns a zone. Held as strings, not instants, so the filter keeps its meaning if the zone resolves late.
+
+Behaviour worth knowing:
+
+- **The calendar edits a draft; Apply commits.** Presets (Today, Last 7 days, Last 30 days, This month) apply at once. One click is a single day.
+- **Changing the filter restarts the list** (rows → skeleton → refetch). The sequence stamp in `loadPage` discards any next-page response from the previous filter.
+- **A snip created or imported while a filter is active is prepended only if it falls inside the range** (`inRange`) — otherwise the grid would show a row the filter excludes. It reappears when the filter is cleared.
+- **Filtered-empty has its own state** ("No snips from …" + *Clear filter*), distinct from an empty library, and the control is hidden for a library with nothing in it.
 
 ## The public page shows a name and nothing else
 

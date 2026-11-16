@@ -17,7 +17,6 @@ import {
   SNIP_STORAGE_PREFIX,
   SNIP_VIDEO_CONTENT_TYPE,
   SNIPPING_TOOL_PAGE_ID,
-  isSnipImportType,
   isValidSnipId,
   normaliseSnipDescription,
   normaliseSnipTitle,
@@ -26,6 +25,8 @@ import {
   resolveSnipSource,
   snipExpiryMs,
   snipImportExtension,
+  snipImportKind,
+  snipImportMaxBytes,
   type SnipKind,
   type SnipRetention,
   type SnipSettings,
@@ -293,13 +294,15 @@ export async function createSnipUploadSlot(
   kind: SnipKind = 'image',
   /**
    * Import only. `source: 'import'` records how the row was created (the card's
-   * badge) and `contentType` names which of the allowlisted image types the
-   * signature should pin — a dropped JPEG has to be stored and served as one.
+   * badge) and `contentType` names which of the allowlisted types the signature
+   * should pin — a dropped JPEG or MP4 has to be stored and served as one. The
+   * `kind` must agree with it.
    *
-   * **The content type is looked up in `SNIP_IMPORT_TYPES`, never taken as
-   * given.** The v4 signature pins whatever it is told, and the public image
-   * route 302s a browser straight at the object — so a free-text value here
-   * would be a way to have us sign a slot for `text/html` on our own bucket.
+   * **The content type is looked up in `SNIP_IMPORT_TYPES` /
+   * `SNIP_VIDEO_IMPORT_TYPES`, never taken as given.** The v4 signature pins
+   * whatever it is told, and the public media routes 302 a browser straight at
+   * the object — so a free-text value here would be a way to have us sign a slot
+   * for `text/html` on our own bucket.
    */
   options: { source?: SnipSource; contentType?: string } = {},
 ): Promise<{
@@ -312,7 +315,14 @@ export async function createSnipUploadSlot(
   // apart: a still that claims 40 MB is not a still, while a ten-minute
   // recording legitimately is. Sharing one limit would mean either refusing
   // real recordings or waving through absurd screenshots.
-  const maxBytes = kind === 'video' ? MAX_SNIP_VIDEO_BYTES : MAX_SNIP_BYTES;
+  // An imported video has a lower ceiling than a recording: it is one browser
+  // PUT rather than a resumable session. See `MAX_SNIP_IMPORT_VIDEO_BYTES`.
+  const imported = options.source === 'import';
+  const maxBytes = imported
+    ? snipImportMaxBytes(kind)
+    : kind === 'video'
+      ? MAX_SNIP_VIDEO_BYTES
+      : MAX_SNIP_BYTES;
   if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes) return null;
 
   const count = await adminDb
@@ -336,14 +346,16 @@ export async function createSnipUploadSlot(
   // layouts work and no migration is required.
   const video = kind === 'video';
   // An import is the only path that may name its own type, and only from the
-  // allowlist. A capture is always the PNG the crop produced, so it never
-  // consults the request at all.
-  const imported = !video && options.source === 'import';
-  const importType =
-    imported && isSnipImportType(options.contentType) ? options.contentType : null;
+  // allowlist — and the type must belong to the kind it claims: a `video/mp4`
+  // on an `image` reservation (or the reverse) would sign a slot whose path and
+  // type disagree with the row. A capture is always what the crop or the
+  // recorder produced, so it never consults the request at all.
+  const importType = imported && snipImportKind(options.contentType) === kind
+    ? (options.contentType as string)
+    : null;
   if (imported && !importType) return null;
-  const contentType = video ? SNIP_VIDEO_CONTENT_TYPE : (importType ?? SNIP_CONTENT_TYPE);
-  const extension = video ? 'webm' : importType ? snipImportExtension(importType) : 'png';
+  const contentType = importType ?? (video ? SNIP_VIDEO_CONTENT_TYPE : SNIP_CONTENT_TYPE);
+  const extension = importType ? snipImportExtension(importType) : video ? 'webm' : 'png';
   const storagePath = `${SNIP_STORAGE_PREFIX}/${id}.${extension}`;
   // A recording's poster is a second object under the same token. It shares the
   // row's lifetime exactly — every delete path below removes both — so it needs
@@ -411,7 +423,11 @@ export async function createSnipUploadSlot(
   // authenticated origin request (rule 9i) for a URL we can mint in the same
   // breath as the first.
   const [[uploadUrl], poster] = await Promise.all([
-    video ? signResumable(storagePath, contentType) : sign(storagePath, contentType),
+    // An imported video is a plain signed PUT from the browser. The resumable
+    // protocol is driven by the main process (a `POST` that returns the session
+    // in a `Location` header the page could not read cross-origin), which an
+    // import never goes through.
+    video && !imported ? signResumable(storagePath, contentType) : sign(storagePath, contentType),
     posterPath ? sign(posterPath, SNIP_CONTENT_TYPE, POSTER_WRITE_TTL_MS) : Promise.resolve(null),
   ]);
 
@@ -421,7 +437,7 @@ export async function createSnipUploadSlot(
     // Named so the caller cannot mistake one protocol for the other. Main
     // branches on this rather than on the kind, because the kind is a product
     // fact and this is a wire fact.
-    resumable: video,
+    resumable: video && !imported,
     ...(poster ? { posterUploadUrl: poster[0] } : {}),
   };
 }
@@ -505,7 +521,15 @@ export async function finalizeSnip(
   if (!metaResult) return null;
   const [metadata] = metaResult;
   const bytes = Number(metadata.size ?? 0);
-  const maxBytes = video ? MAX_SNIP_VIDEO_BYTES : MAX_SNIP_BYTES;
+  // The row says whether it is an import, so the lower import ceiling is
+  // re-applied against the object's REAL size: a signed PUT cannot pin a length,
+  // so the reservation's check was only ever against the caller's claim.
+  const maxBytes =
+    data.source === 'import'
+      ? snipImportMaxBytes(kind)
+      : video
+        ? MAX_SNIP_VIDEO_BYTES
+        : MAX_SNIP_BYTES;
   if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes) {
     // Oversized or empty: the object is the only evidence, so remove it rather
     // than leave an unreferenced blob behind a row we are about to refuse. The
@@ -645,13 +669,26 @@ async function toSnipRow(doc: FirebaseFirestore.QueryDocumentSnapshot): Promise<
  * The owner's own snips, newest first. `status == 'ready'` only — a pending
  * reservation is not a thing anyone can look at.
  *
- * Ordering and filters match the existing composite index exactly, and the
- * cursor rides the same ordering, so paging adds no index (rule 1: nothing to
- * deploy). The only extra read a page costs is the cursor document itself.
+ * **`from` / `to` are an inclusive range of UTC epoch milliseconds on
+ * `createdAt`.** The client resolves "these calendar days" into instants in the
+ * viewer's own timezone (the one every card's date is rendered in), so the
+ * server never needs to know a zone. Either end may be omitted.
+ *
+ * Ordering and filters match the existing composite index exactly — a range on
+ * the same field the query orders by is served by `ownerUid, status, createdAt
+ * desc` — and the cursor rides the same ordering, so neither paging nor the date
+ * filter adds an index (rule 1: nothing to deploy). The only extra read a page
+ * costs is the cursor document itself. The count, on the first page only,
+ * carries the same range, so "24 of 118" counts what the filter matches.
  */
 export async function listSnipPage(
   uid: string,
-  options: { limit?: number; cursor?: string | null } = {},
+  options: {
+    limit?: number;
+    cursor?: string | null;
+    from?: number | null;
+    to?: number | null;
+  } = {},
 ): Promise<SnipPage> {
   const size = Math.min(
     Math.max(Math.floor(options.limit ?? SNIP_PAGE_SIZE), 1),
@@ -659,12 +696,18 @@ export async function listSnipPage(
   );
   const cursor = options.cursor ?? null;
 
-  let query = adminDb
+  let filtered: FirebaseFirestore.Query = adminDb
     .collection(COLLECTION)
     .where('ownerUid', '==', uid)
-    .where('status', '==', 'ready')
-    .orderBy('createdAt', 'desc')
-    .limit(size);
+    .where('status', '==', 'ready');
+  if (options.from != null) {
+    filtered = filtered.where('createdAt', '>=', Timestamp.fromMillis(options.from));
+  }
+  if (options.to != null) {
+    filtered = filtered.where('createdAt', '<=', Timestamp.fromMillis(options.to));
+  }
+
+  let query = filtered.orderBy('createdAt', 'desc').limit(size);
 
   if (cursor) {
     const parsed = parseSnipCursor(cursor);
@@ -680,14 +723,7 @@ export async function listSnipPage(
 
   const [snap, count] = await Promise.all([
     query.get(),
-    cursor
-      ? null
-      : adminDb
-          .collection(COLLECTION)
-          .where('ownerUid', '==', uid)
-          .where('status', '==', 'ready')
-          .count()
-          .get(),
+    cursor ? null : filtered.count().get(),
   ]);
 
   const snips = await Promise.all(snap.docs.map(toSnipRow));

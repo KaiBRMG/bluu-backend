@@ -54,6 +54,8 @@ export const GET = withAuth(async () => {
       isSubAccount: a.isSubAccount,
       parentCreatorId: a.parentCreatorId,
       parentStageName: a.parentStageName,
+      // Only sent when set, so the roster grows by nothing for real creators.
+      ...(a.isAiCreator ? { isAiCreator: true } : {}),
     }));
 
     return NextResponse.json({ creators });

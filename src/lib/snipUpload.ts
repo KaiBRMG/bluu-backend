@@ -1,4 +1,19 @@
+import { snipImportKind } from '@/lib/snips';
 import type { SnipRow } from '@/types/snips';
+
+/**
+ * What the browser learned about a file before it was uploaded — everything the
+ * server cannot work out for itself because it never sees the bytes.
+ */
+export interface SnipImportMeta {
+  width: number;
+  height: number;
+  /** Videos only. Read from the element's metadata, in milliseconds. */
+  durationMs?: number;
+  /** Videos only: a frame drawn onto a canvas, as a PNG. Null when one could not
+   *  be taken — the import carries on without a thumbnail. */
+  poster?: Blob | null;
+}
 
 /**
  * Uploads one capture and returns the live snip.
@@ -105,14 +120,19 @@ export class SnipQuotaFullError extends Error {}
  * be read is refused here rather than finalised with zeros, since `width` and
  * `height` are what reserve the box on the public page.
  *
- * **Stills only.** There is no video import: a recording carries a durable
- * on-disk queue, a poster frame and a resumable session, and none of that
- * applies to a file that is already sitting on the user's machine.
+ * **A video is the same three legs plus a poster.** It is one plain browser
+ * `PUT` — not the resumable session main drives for a recording, which an import
+ * has no route to — so it is capped lower (`MAX_SNIP_IMPORT_VIDEO_BYTES`). The
+ * duration is read in the browser too, for the same reason as the dimensions,
+ * and the poster is a frame the dialog drew onto a canvas; it goes to the poster
+ * slot the reservation signed beside the video. **The poster is best-effort**: if
+ * it fails the row simply has none (`finalizeSnip` drops `posterPath`) and the
+ * card shows its placeholder.
  */
 export async function importSnip(
   idToken: string,
   file: File,
-  dimensions: { width: number; height: number },
+  meta: SnipImportMeta,
   /**
    * Bytes sent, 0–1. Optional, and only the PUT leg reports — the two JSON
    * legs either side of it are a few hundred bytes each and a bar that jumped
@@ -120,10 +140,12 @@ export async function importSnip(
    */
   onProgress?: (fraction: number) => void,
 ): Promise<SnipRow> {
+  const kind = snipImportKind(file.type);
+  if (!kind) throw new Error('That file type cannot be imported.');
   const slotRes = await fetch('/api/snips/upload-url', {
     method: 'POST',
     headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bytes: file.size, kind: 'image', source: 'import', contentType: file.type }),
+    body: JSON.stringify({ bytes: file.size, kind, source: 'import', contentType: file.type }),
   });
   if (!slotRes.ok) {
     const message = await errorMessage(slotRes, 'Could not start the upload');
@@ -131,7 +153,11 @@ export async function importSnip(
     // rather than spend a request per remaining file on the same answer.
     throw slotRes.status === 409 ? new SnipQuotaFullError(message) : new Error(message);
   }
-  const { id, uploadUrl } = (await slotRes.json()) as { id: string; uploadUrl: string };
+  const { id, uploadUrl, posterUploadUrl } = (await slotRes.json()) as {
+    id: string;
+    uploadUrl: string;
+    posterUploadUrl?: string;
+  };
 
   // **`XMLHttpRequest`, not `fetch`, and only here.** An import is a file the
   // user chose off their own disk and can be two orders of magnitude larger
@@ -159,7 +185,7 @@ export async function importSnip(
   }).catch(() => {
     throw new Error(
       typeof navigator !== 'undefined' && navigator.onLine === false
-        ? 'You are offline — the image was not uploaded.'
+        ? 'You are offline — the file was not uploaded.'
         : 'Storage rejected the upload (CORS). The bucket needs its CORS policy applied — see storage-cors.json.',
     );
   });
@@ -169,20 +195,37 @@ export async function importSnip(
   // The bytes are in the bucket; the finalise below is the only thing left.
   onProgress?.(1);
 
+  // A video's thumbnail, after the video so a failed transfer does not waste it.
+  // Swallowed on every failure: `finalizeSnip` checks the object exists and
+  // drops `posterPath` when it does not, so a missing poster costs a placeholder
+  // on the card and nothing else — never the import.
+  if (kind === 'video' && meta.poster && posterUploadUrl) {
+    try {
+      await fetch(posterUploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/png' },
+        body: meta.poster,
+      });
+    } catch {
+      // Best-effort by design — see above.
+    }
+  }
+
   const finalRes = await fetch('/api/snips', {
     method: 'POST',
     headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       id,
-      width: dimensions.width,
-      height: dimensions.height,
+      width: meta.width,
+      height: meta.height,
+      ...(kind === 'video' ? { durationMs: meta.durationMs ?? 0 } : {}),
       // The file already has a name and it is the only thing about this snip
       // the user has actually written. The server normalises and caps it.
       title: file.name.replace(/\.[^.]+$/, ''),
     }),
   });
   if (!finalRes.ok) {
-    throw new Error(await errorMessage(finalRes, 'The image could not be saved'));
+    throw new Error(await errorMessage(finalRes, 'The file could not be saved'));
   }
 
   const { snip } = (await finalRes.json()) as { snip: SnipRow };

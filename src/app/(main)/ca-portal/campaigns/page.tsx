@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
-import { useCreators } from "@/hooks/useCreators";
+import { useContentCreators } from "@/hooks/useCreators";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -838,7 +838,7 @@ function CreatorCampaignsTable({ creatorID, creatorName, creators, userNames, is
 
 export default function CACampaignsPage() {
   const { user } = useAuth();
-  const creators = useCreators();
+  const creators = useContentCreators();
   const { names: userNames } = useUserName();
   const [activeTab, setActiveTab] = useState("overview");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["overview"]));

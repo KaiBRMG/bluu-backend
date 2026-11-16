@@ -54,6 +54,9 @@ export const POST = withAuth(
       if (error instanceof Error && error.message === 'SUBJECT_NOT_FOUND') {
         return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
       }
+      if (error instanceof Error && error.message === 'SUBJECT_IS_AI_CREATOR') {
+        return NextResponse.json({ error: 'AI creators do not sign in, so they have no Telegram link' }, { status: 400 });
+      }
       console.error('[POST /api/admin/creators/[creatorId]/telegram-link]', error);
       return NextResponse.json({ error: 'Failed to generate link' }, { status: 500 });
     }

@@ -50,7 +50,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
         {
           error:
             source === 'import'
-              ? 'That file is not a supported image, or is too large'
+              ? 'That file is not a supported image or video, or is too large'
               : 'That capture is not a valid size',
         },
         { status: 400 },

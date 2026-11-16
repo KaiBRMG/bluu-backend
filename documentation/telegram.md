@@ -194,6 +194,8 @@ Its `web_app` URL must be on a domain registered for the bot in BotFather, which
 
 `/creator-portal/creator-management` shows a **Telegram** column — `Connected`/`@handle` in green, `Not connected` in orange (warning, not neutral: an unconnected creator cannot sign in at all). The row menu offers "Copy Telegram link" (which becomes "Copy **new** Telegram link" once one is issued — pressing it revokes the previous) and "Disconnect Telegram".
 
+**AI creators are the exception** (`isAiCreator`, [ca-salary.md](ca-salary.md#ai-creators--accounts-with-nobody-behind-them)): accounts with no person behind them, there only so their sales import. They show a grey *AI creator* chip instead, have no Telegram actions, and `mintTelegramLinkToken` + `withCreatorAuth` both refuse them; their Auth account is created disabled.
+
 ---
 
 ## Employees: an extra channel

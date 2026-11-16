@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import AppLayout from "@/components/AppLayout";
-import { useCreators } from "@/hooks/useCreators";
+import { useContentCreators } from "@/hooks/useCreators";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -1382,7 +1382,7 @@ function MyCustomsKanban({ currentUserUid, creators, userNames, isActive }: MyCu
 
 export default function CACustomRequestsPage() {
   const { user } = useAuth();
-  const creators = useCreators();
+  const creators = useContentCreators();
   const { names: userNames } = useUserName();
   const [activeTab, setActiveTab] = useState("my-customs");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(() => new Set(["my-customs"]));

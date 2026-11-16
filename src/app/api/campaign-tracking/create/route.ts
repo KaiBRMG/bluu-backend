@@ -45,6 +45,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       const fanKey = await resolveFanKeyForLink(profileLink);
       const creatorSnap = await adminDb.collection('creators').doc(creatorID).get();
       if (!creatorSnap.exists) return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
+      if (creatorSnap.get('isAiCreator') === true) {
+        return NextResponse.json({ error: 'AI creators do not take campaigns' }, { status: 400 });
+      }
 
       const entryRef = adminDb.collection('campaign-tracking').doc();
       const entryData: Record<string, unknown> = {
@@ -117,6 +120,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     const result = await adminDb.runTransaction(async (tx) => {
       const creatorSnap = await tx.get(creatorRef);
       if (!creatorSnap.exists) throw new Error('Creator not found');
+      if (creatorSnap.get('isAiCreator') === true) throw new Error('AI creators do not take custom requests');
 
       const creatorData = creatorSnap.data()!;
       const nextNum = (creatorData.lastCRID ?? 0) + 1;
@@ -180,6 +184,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
 
     return NextResponse.json({ success: true, id: result.id, CR: result.CR });
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'AI creators do not take custom requests') {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error('[POST /api/campaign-tracking/create]', error);
     return NextResponse.json({ error: 'Failed to create entry' }, { status: 500 });
   }

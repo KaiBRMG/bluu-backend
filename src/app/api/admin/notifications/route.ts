@@ -119,7 +119,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     if (allCreators === true) {
       const creatorsSnap = await adminDb.collection('creators').get();
       for (const doc of creatorsSnap.docs) {
-        if (doc.data().isArchived !== true) allCreatorUids.add(doc.id);
+        // AI creators have nobody behind them to notify.
+        if (doc.data().isArchived !== true && doc.data().isAiCreator !== true) allCreatorUids.add(doc.id);
       }
     }
 

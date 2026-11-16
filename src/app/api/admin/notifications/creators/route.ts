@@ -40,7 +40,8 @@ export const GET = withAuth(async (_request: NextRequest, token: DecodedIdToken)
     // otherwise queried, so it stays exempt from indexing (rule 9).
     const snap = await adminDb.collection('creators').get();
     const creators: CreatorRecipient[] = snap.docs
-      .filter(doc => doc.data().isArchived !== true)
+      // AI creators have nobody to receive a message (no Telegram, no login).
+      .filter(doc => doc.data().isArchived !== true && doc.data().isAiCreator !== true)
       .map(doc => ({
         uid: doc.id,
         stageName: (doc.data().stageName as string | undefined) ?? doc.id,

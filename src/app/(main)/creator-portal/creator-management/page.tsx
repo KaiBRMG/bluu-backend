@@ -7,6 +7,8 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
+import { SELECT_BOX_CLASS } from "@/lib/surfaces";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -54,6 +56,9 @@ interface Creator {
    *  Telegram is the only way into the creator portal, this doubles as "can
    *  this creator actually sign in yet?". */
   telegram?: { username: string | null; linkedAt: string | null } | null;
+  /** An account with no person behind it, there only so its sales import. Set
+   *  at create time and never changed; it has no Telegram and cannot sign in. */
+  isAiCreator?: boolean;
   /** Other accounts this creator runs, archived ones included. Projected by
    *  GET /api/admin/creators so the table needs no request per row. */
   subAccounts: SubAccountSummary[];
@@ -227,6 +232,9 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
   // creator shows exactly what is stored, so a legacy blank stays visibly blank.
   const [platform, setPlatform] = useState<AccountPlatform | null>(isEdit ? (initial?.platform ?? null) : 'onlyfans');
   const [driveLink, setDriveLink] = useState(initial?.driveLink ?? '');
+  // Fixed once the account exists (the server will not change it), so an edit
+  // only reads it.
+  const [isAiCreator, setIsAiCreator] = useState(initial?.isAiCreator === true);
   // Read-only: `defaultTimezone` is detected from the creator's own device when
   // they sign in (POST /api/creator/timezone) and is the basis of every due-date
   // calculation. An admin value here would be silently overwritten at their next
@@ -288,7 +296,8 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
       } else {
         const res = await apiRequest('/api/admin/creators', {
           method: 'POST',
-          body: JSON.stringify({ stageName, OFID, platform, driveLink }),
+          // An AI creator makes no content, so it has no Drive folder.
+          body: JSON.stringify({ stageName, OFID, platform, driveLink: isAiCreator ? '' : driveLink, isAiCreator }),
         });
         if (!res.ok) throw new Error(await errorMessage(res, 'Could not add the creator'));
         const { uid } = (await res.json()) as { uid: string };
@@ -300,6 +309,14 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
           toast.warning(`${stageName} added, but the photo did not upload.`, {
             description: 'Edit the creator to try the photo again.',
           });
+        }
+        // Nobody signs in as an AI creator, so there is no link to hand over.
+        if (isAiCreator) {
+          toast.success(`${stageName} added as an AI creator`, {
+            description: 'Their OnlyMonster sales import once the account is mapped.',
+          });
+          onSaved();
+          return;
         }
         // A failed mint leaves the field's own generate button to retry with.
         const url = await mintTelegramLink(uid).catch(() => null);
@@ -339,9 +356,11 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
       <DialogHeader>
         <DialogTitle>{isEdit ? `Edit ${initial?.stageName}` : 'Add creator'}</DialogTitle>
         <DialogDescription>
-          {isEdit
-            ? 'Changes apply to their portal account straight away.'
-            : 'Creates their portal account. They sign in through Telegram once you send them a link.'}
+          {isAiCreator
+            ? 'An account chat agents work with no real creator behind it. It only exists so its sales import.'
+            : isEdit
+              ? 'Changes apply to their portal account straight away.'
+              : 'Creates their portal account. They sign in through Telegram once you send them a link.'}
         </DialogDescription>
       </DialogHeader>
 
@@ -407,33 +426,58 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
         <p className="text-xs text-zinc-400">Only OnlyFans accounts receive OnlyFans sales and stats.</p>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="creator-drive" className="text-xs text-zinc-400">
-          Google Drive link <span className="font-normal">(optional)</span>
-        </Label>
-        <Input
-          id="creator-drive"
-          type="url"
-          value={driveLink}
-          onChange={e => setDriveLink(e.target.value)}
-          placeholder="https://drive.google.com/…"
-        />
-      </div>
+      {/* Create-only: the server never changes it afterwards, so an edit shows
+          nothing here — the dialog's description already says what it is. */}
+      {!isEdit && (
+        <div className="flex items-start gap-2.5">
+          <Checkbox
+            id="creator-ai"
+            checked={isAiCreator}
+            onCheckedChange={v => setIsAiCreator(v === true)}
+            className={cn('mt-0.5', SELECT_BOX_CLASS)}
+          />
+          <div className="space-y-0.5">
+            <Label htmlFor="creator-ai" className="cursor-pointer text-sm">AI Creator</Label>
+            <p className="text-xs text-zinc-400">
+              No Telegram sign-in, custom requests, campaigns or content plans. Used only to import sales.
+              This cannot be changed later.
+            </p>
+          </div>
+        </div>
+      )}
 
-      {/* Timezone — reported, not set. See `detectedTimezone` above. */}
-      <div className="space-y-1.5">
-        <p className="text-xs font-medium text-zinc-400">Timezone</p>
-        <p className="text-sm">
-          {detectedTimezone ? timezoneLabel(detectedTimezone) : <span className="text-zinc-400">Not detected yet</span>}
-        </p>
-        <p className="text-xs text-zinc-400">
-          {detectedTimezone
-            ? "Detected from this creator's device. Due dates are judged against it."
-            : 'Detected automatically the first time this creator signs in.'}
-        </p>
-      </div>
+      {!isAiCreator && (
+        <div className="space-y-1.5">
+          <Label htmlFor="creator-drive" className="text-xs text-zinc-400">
+            Google Drive link <span className="font-normal">(optional)</span>
+          </Label>
+          <Input
+            id="creator-drive"
+            type="url"
+            value={driveLink}
+            onChange={e => setDriveLink(e.target.value)}
+            placeholder="https://drive.google.com/…"
+          />
+        </div>
+      )}
 
-      {isEdit && initial && (
+      {/* Timezone — reported, not set. See `detectedTimezone` above. An AI
+          creator never signs in, so nothing would ever detect one. */}
+      {!isAiCreator && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-zinc-400">Timezone</p>
+          <p className="text-sm">
+            {detectedTimezone ? timezoneLabel(detectedTimezone) : <span className="text-zinc-400">Not detected yet</span>}
+          </p>
+          <p className="text-xs text-zinc-400">
+            {detectedTimezone
+              ? "Detected from this creator's device. Due dates are judged against it."
+              : 'Detected automatically the first time this creator signs in.'}
+          </p>
+        </div>
+      )}
+
+      {isEdit && initial && !isAiCreator && (
         <TelegramLinkField uid={initial.uid} connected={!!initial.telegram} />
       )}
 
@@ -445,7 +489,7 @@ function CreatorForm({ initial, onSaved, onCancel, onBusyChange, onRefresh }: Cr
         </Button>
         <Button type="submit" disabled={saving}>
           {saving && <Loader2Icon aria-hidden className="activity-spinner" />}
-          {isEdit ? 'Save changes' : 'Add creator'}
+          {isEdit ? 'Save changes' : isAiCreator ? 'Add AI creator' : 'Add creator'}
         </Button>
       </DialogFooter>
     </form>
@@ -601,7 +645,13 @@ function CreatorTable({
                     </span>
                   </TableCell>
                   <TableCell>
-                    {creator.telegram ? (
+                    {creator.isAiCreator ? (
+                      // An attribute, not a state: greyscale, and never the
+                      // orange "Not connected" — there is nothing to connect.
+                      <span className="inline-flex items-center rounded-md bg-white/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-zinc-300">
+                        AI creator
+                      </span>
+                    ) : creator.telegram ? (
                       <span className="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-400">
                         {creator.telegram.username ? `@${creator.telegram.username}` : 'Connected'}
                       </span>
@@ -628,17 +678,23 @@ function CreatorTable({
                         <DropdownMenuItem onClick={() => onManageSubAccounts(creator)}>
                           Sub-accounts
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => onTelegramLink(creator)}>
-                          {creator.telegram ? 'Copy new Telegram link' : 'Copy Telegram link'}
-                        </DropdownMenuItem>
-                        {creator.telegram && (
+                        {/* An AI creator has no sign-in, so the Telegram and
+                            portal-access actions have nothing to act on. */}
+                        {!creator.isAiCreator && (
+                          <DropdownMenuItem onClick={() => onTelegramLink(creator)}>
+                            {creator.telegram ? 'Copy new Telegram link' : 'Copy Telegram link'}
+                          </DropdownMenuItem>
+                        )}
+                        {!creator.isAiCreator && creator.telegram && (
                           <DropdownMenuItem onClick={() => onTelegramDisconnect(creator)}>
                             Disconnect Telegram
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem onClick={() => onToggleActive(creator)}>
-                          {creator.isActive ? 'Deactivate' : 'Reactivate'}
-                        </DropdownMenuItem>
+                        {!creator.isAiCreator && (
+                          <DropdownMenuItem onClick={() => onToggleActive(creator)}>
+                            {creator.isActive ? 'Deactivate' : 'Reactivate'}
+                          </DropdownMenuItem>
+                        )}
                         {!creator.isArchived && (
                           <DropdownMenuItem onClick={() => onArchive(creator)}>
                             Archive

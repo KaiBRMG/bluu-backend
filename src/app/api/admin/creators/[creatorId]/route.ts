@@ -50,7 +50,16 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken, 
 
     // Build a single Auth update to avoid redundant sequential calls
     const authUpdate: { disabled?: boolean } = {};
-    if ('isActive' in body) authUpdate.disabled = !body.isActive;
+    if ('isActive' in body) {
+      authUpdate.disabled = !body.isActive;
+      // An AI creator's Auth account stays disabled whatever `isActive` says —
+      // there is nobody to sign in. Only read the doc when reactivation could
+      // otherwise enable it.
+      if (body.isActive === true) {
+        const snap = await adminDb.collection('creators').doc(creatorId).get();
+        if (snap.get('isAiCreator') === true) authUpdate.disabled = true;
+      }
+    }
     if (body.isArchived === true) authUpdate.disabled = true;
 
     await Promise.all([

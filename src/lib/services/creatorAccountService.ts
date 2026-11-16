@@ -50,6 +50,13 @@ export interface AssignableAccount {
   parentCreatorId: string | null;
   /** The owning creator's name, for a "Cole → Fansly" grouped picker. */
   parentStageName: string | null;
+  /**
+   * An account with no real person behind it, there only so its sales import
+   * (`CreatorFullDocument.isAiCreator`). Still assignable to shifts and paid
+   * like any other; left out of the creator-as-a-brand surfaces. A sub-account
+   * inherits it from its parent.
+   */
+  isAiCreator: boolean;
 }
 
 /**
@@ -76,7 +83,7 @@ export async function getCreatorAccounts({ includeArchived }: { includeArchived:
   const [creatorSnap, subSnap] = await Promise.all([
     adminDb
       .collection(CREATORS)
-      .select('creatorID', 'stageName', 'defaultTimezone', 'isArchived', 'photoURL', 'photoThumb')
+      .select('creatorID', 'stageName', 'defaultTimezone', 'isArchived', 'photoURL', 'photoThumb', 'isAiCreator')
       .get(),
     adminDb.collection(SUBACCOUNTS).get(),
   ]);
@@ -96,6 +103,7 @@ export async function getCreatorAccounts({ includeArchived }: { includeArchived:
       isSubAccount: false,
       parentCreatorId: null,
       parentStageName: null,
+      isAiCreator: data.isAiCreator === true,
     });
   }
 
@@ -119,6 +127,7 @@ export async function getCreatorAccounts({ includeArchived }: { includeArchived:
       isSubAccount: true,
       parentCreatorId: data.parentCreatorId,
       parentStageName: parent.stageName,
+      isAiCreator: parent.isAiCreator,
     });
   }
 
