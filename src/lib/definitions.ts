@@ -91,6 +91,10 @@ export const PAGES: PageDef[] = [
   // Chatter / Fan Analytics (2026-10; OnlyMonster since 2026-11). Agents see a
   // named sales board and fans of the creators they are rostered on; `ca-admin`
   // holders see everything. See documentation/onlymonster.md.
+  // The Shift Management roster with creators as rows: who works each account,
+  // and the hours nobody does. Agents read it; `shift-management` holders also
+  // edit from it. See documentation/ca-salary.md §14.
+  { pageId: 'ca-shift-calendar', title: 'Shift Calendar', teamspaceId: 'ca-portal', href: '/ca-portal/shift-calendar', icon: 'CalendarRange', order: 1.5 },
   { pageId: 'ca-chatter-analytics', title: 'Chatter Analytics', teamspaceId: 'ca-portal', href: '/ca-portal/chatter-analytics', icon: 'MessagesSquare', order: 2 },
   { pageId: 'ca-fan-analytics', title: 'Fan Analytics', teamspaceId: 'ca-portal', href: '/ca-portal/fan-analytics', icon: 'UsersRound', order: 3 },
   { pageId: 'ca-custom-requests', title: 'Custom Requests', teamspaceId: 'ca-portal', href: '/ca-portal/custom-requests', icon: 'ImagePlay', order: 4 },

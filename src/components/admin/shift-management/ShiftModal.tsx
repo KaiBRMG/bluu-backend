@@ -48,6 +48,12 @@ interface Props {
   shift?: ExpandedShift;        // for edit
   prefillUserId?: string;       // for create from cell click
   prefillDate?: string;         // "YYYY-MM-DD" for create from cell click
+  /**
+   * Create from a creator's cell (Shift Calendar): the account starts assigned
+   * and **no employee is preselected** — the admin is filling a gap and the
+   * question is who. Without this the employee defaults to the first in the list.
+   */
+  prefillCreatorId?: string;
   users: ShiftUser[];
   viewerTimezone: string;       // admin's IANA timezone — all display/input is in this tz
   onSave: (shiftId: string | null, payload: CreateShiftPayload | UpdateShiftPayload, saveMode: SaveMode) => Promise<void>;
@@ -103,6 +109,7 @@ export default function ShiftModal({
   shift,
   prefillUserId,
   prefillDate,
+  prefillCreatorId,
   users,
   viewerTimezone,
   onSave,
@@ -122,7 +129,7 @@ export default function ShiftModal({
 
   // ── Form state ──────────────────────────────────────────────────────
   // All dates/times are in the admin's timezone (viewerTimezone)
-  const defaultUser = prefillUserId ?? shift?.userId ?? users[0]?.uid ?? '';
+  const defaultUser = prefillUserId ?? shift?.userId ?? (prefillCreatorId ? '' : users[0]?.uid ?? '');
 
   const defaultStartDate = prefillDate
     ?? (shift ? toLocalDateString(shift.occurrenceStart, viewerTimezone) : new Date().toISOString().slice(0, 10));
@@ -156,7 +163,7 @@ export default function ShiftModal({
   // Creator assignment. Absent on every shift created before this existed,
   // which is exactly the case the salary engine's inferred-account fallback
   // covers — see salaryEngine.ts.
-  const [creatorIds,    setCreatorIds]    = useState<string[]>(shift?.creatorIds ?? []);
+  const [creatorIds,    setCreatorIds]    = useState<string[]>(shift?.creatorIds ?? (prefillCreatorId ? [prefillCreatorId] : []));
   // Which of those accounts are overtime the agent works *without* extra pay.
   // Absent on every shift written before this control existed, which reads as
   // "all regular" — the behaviour those shifts were priced at.

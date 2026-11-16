@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import type { ExpandedShift } from '@/lib/utils/recurrence';
-import { getCache, setCache, invalidateCache } from '@/lib/queryCache';
+import { getCache, setCache, invalidateCache, invalidateCacheByPrefix } from '@/lib/queryCache';
 import { getMondayOfWeek as _getMondayOfWeek, todayStr as _todayStr } from '@/lib/utils/timezone';
 
 // Re-export from shared module for backward compatibility
@@ -57,6 +57,11 @@ const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 function cacheKey(weekStart: string): string {
   return `bluu_shifts_week_v1:${weekStart}`;
+}
+
+/** Drop every cached Schedule week — for a write made on another surface (the Shift Calendar). */
+export function invalidateShiftsWeekCache(): void {
+  invalidateCacheByPrefix('bluu_shifts_week_v1:');
 }
 
 

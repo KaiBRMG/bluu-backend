@@ -93,7 +93,7 @@ No source can reassign a sale, so who holds one is decided **here**. The sync cr
 - **Audit:** every holder change appends to the sale's `assignmentLog`.
 - Tier notices for both agents run from `after()`.
 
-**Where a mismatch shows.** Every serialised sale carries `assignment`, `matchesSource`, `buddyxUserId` and `attributedBy`. `SaleHolderNote` renders them identically on CA Admin → Sales and on the agent's Sales Report. The ledger's **Source credits** column shows `buddyxUserId` (BuddyX rows only; OnlyMonster reports no per-sale chatter). The tips/PPV info tips everywhere, Chatter Analytics included, use `LEDGER_*_ATTRIBUTION`: strict shift since the OnlyMonster cutover, with BuddyX's pick before it.
+**Where a mismatch shows.** Every serialised sale carries `assignment`, `matchesSource`, `buddyxUserId` and `attributedBy`. `SaleHolderNote` renders them identically on CA Admin → Sales and on the agent's Sales Report. The ledger has no source-credit column and no *Differs from source* view (removed 2026-11-16: OnlyMonster credits no one per sale, so there is nothing to compare); a BuddyX credit still surfaces in `SaleHolderNote` and the Reassign dialog. The tips/PPV info tips everywhere, Chatter Analytics included, use `LEDGER_*_ATTRIBUTION`: strict shift since the OnlyMonster cutover, with BuddyX's pick before it.
 
 ## 5b. CA Admin → Sales: the ledger and its anomalies
 
@@ -103,7 +103,7 @@ Disputes are part of this tab:
 - The **Disputed** view shows every claimed sale with its per-sale outcome (`disputeLedger.ts`).
 
 The ledger shows every sale in a range of salary days, newest first, from `GET /api/ca-salary/sales?userId=all&from&to` (≤ 93 days). It is filtered and paged in memory.
-- **Columns:** when · creator · held by (+ `SaleHolderNote`) · on shift · source credits · type · fan · gross · net · actions.
+- **Columns:** when · creator · held by (+ `SaleHolderNote`) · on shift · type · fan · gross · net · actions.
 - **Off schedule:** the holder is not among the agents on shift at the instant, with no grace.
 - **Moving a sale:** **Assign** / **Reassign** / one-click **Move to {agent on shift}**, plus bulk moves from the selection bar.
 

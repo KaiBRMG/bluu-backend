@@ -383,6 +383,16 @@ Its management surfaces (2026-09-30) add four conventions worth reusing:
 
 - **A status pill can be the control (Tasks).** On [`TaskRow`](src/app/(main)/applications/apps-tasks/components/TaskRow.tsx) the status is a fixed-width pill with a chevron that opens a menu of the statuses *that kind* of record has — the most frequent action never opens a dialog. Its hues are borrowed from `STATUS_COLORS` via `taskStatus.ts`, the whole row is one `inset-0` open-target with the pill the only thing above it, and "Overdue" / "Checked at clock-out" are the only coloured words on the row because each encodes a state.
 
+### The coverage grid (Shift Calendar)
+
+`/ca-portal/shift-calendar` is the reference for **a week grid whose rows are the things that need covering**, as opposed to Shift Management's rows of the people doing the covering. See [ca-salary.md §14](documentation/ca-salary.md).
+
+- **Rows are accounts, cells are the people on them** — one line per shift (face, first name, window), so the grid is read by *who*. Agents are **greyscale**: Schedule hues each agent, which across forty rows becomes a rainbow. The viewer's own line is the one Action Blue mark (`bg-action-blue/[0.08]` + inset ring, the name reading *You*).
+- **A 24-hour strip under the lines states what is missing**, and the hours are also written (*6h uncovered*) because a bar alone is not accessible. Covered is `white/45`, uncovered orange. **Orange only while it can still be acted on**: a gap in the past drops to neutral, so the grid never shouts about history.
+- **A shift that crosses midnight says which edge** (*until 06:00* / *from 22:00*) rather than repeating the full window on both days.
+- **Editor affordances are an opt-in layer.** For `shift-management` holders a cell is a click target and carries a hover/focus-revealed `+` button (the keyboard route); for everyone else the same cells are inert.
+- The page band above the grid is the attention-band recipe: static orange dot, counts what needs a look, offers *Show them*, and states its own empty (*Nothing needs a look.*).
+
 ### The decision queue (Disputes)
 
 The CA dashboard's **Sale Disputes** column and the All-disputes dialog behind it are the reference for a **queue of decisions** — a list whose task is "rule on each of these", as opposed to the faceted index's "find the one I need" or a table's "audit the column". When the reader's job on every row is *approve or reject*, build this shape rather than a table with an actions column. *(This lived at `/ca-portal/disputes` until 2026-09-18; that route is now a redirect onto the dashboard. Everything below is unchanged by the move.)*

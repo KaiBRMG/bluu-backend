@@ -1,23 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
-import { getUserById, getAllTimeTrackingUsers } from '@/lib/services/userService';
-import { adminDb } from '@/lib/firebase-admin';
-import {
-  getShiftsByRange,
-  getShiftsByUserAndRange,
-  getLedgerEntriesForUsers,
-  getActiveSessionsForUsers,
-} from '@/lib/services/shiftService';
-import { expandShiftsForWindow } from '@/lib/utils/recurrence';
-import { serialiseShift } from '@/lib/utils/shiftSerialise';
-import { matchLeaveToOccurrences, occurrenceKey } from '@/lib/utils/leaveMatch';
-import { computeAttendance, computeTimeWorked } from '@/lib/utils/shiftAttendance';
+import { getUserById } from '@/lib/services/userService';
+import { loadShiftRoster } from '@/lib/services/shiftRosterService';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import type { DocumentSnapshot } from 'firebase-admin/firestore';
 
 // ─── GET /api/shifts/week ─────────────────────────────────────────────
 // ?weekStart=YYYY-MM-DD  (Monday of the week, UTC)
 // &userId=uid            (optional — restrict to one user)
+//
+// The roster itself is built by `loadShiftRoster`, which the CA Portal's Shift
+// Calendar (`/api/ca-shift-calendar`) shares, so the two grids cannot disagree.
+// Not browser-cached: it is the admin's editing surface and is refetched right
+// after every write.
 
 export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) => {
   try {
@@ -43,149 +37,15 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       return NextResponse.json({ error: 'Invalid weekStart format' }, { status: 400 });
     }
 
-    // ── 1. Fetch all shifts for the week (1–2 Firestore queries) ──────
-    const rawShifts = filterUserId
-      ? await getShiftsByUserAndRange(filterUserId, weekStartMs, weekEndMs)
-      : await getShiftsByRange(weekStartMs, weekEndMs);
-
-    // ── 2. Fetch ALL time-tracking users (one query) + any extra users
-    //       referenced by shifts but not yet in that set ─────────────────
-    const shiftUserIds = [...new Set(rawShifts.map(s => s.userId))];
-    const shiftUserRefs = shiftUserIds.map(uid => adminDb.collection('users').doc(uid));
-
-    const [allTtUsers, shiftUserSnaps] = await Promise.all([
-      getAllTimeTrackingUsers(),
-      shiftUserIds.length > 0
-        ? adminDb.getAll(...shiftUserRefs)
-        : Promise.resolve([] as DocumentSnapshot[]),
-    ]);
-
-    const shiftUserDocs = shiftUserSnaps.map((snap, i) => ({
-      uid: shiftUserIds[i],
-      user: snap.exists ? snap.data() : null,
-    }));
-
-    // Build a unified map: uid → user doc.
-    // Archived users are excluded — they are removed from the system, so they
-    // must not appear in the shift grid or the shift-assignment picker.
-    const userMap = new Map<string, any>();
-    for (const u of allTtUsers) {
-      if (u?.uid && u.isArchived !== true) userMap.set(u.uid, u);
-    }
-    for (const { uid, user } of shiftUserDocs) {
-      if (!userMap.has(uid) && user?.isArchived !== true && user?.permittedPageIds?.includes('time-tracking')) userMap.set(uid, user);
-    }
-
-    // All eligible (time-tracking permitted) user IDs
-    const eligibleUserIds = new Set(userMap.keys());
-
-    // ── 3. Batch-fetch time_entries + active_sessions (2–3 Firestore reads total) ──
-    const now = Date.now();
-    const BUFFER_MS = 4 * 60 * 60 * 1000; // 4h before window for sessions that started before shift
-
-    const [ledgerByUser, activeSessions] = await Promise.all([
-      getLedgerEntriesForUsers(
-        [...eligibleUserIds],
-        weekStartMs - BUFFER_MS,
-        weekEndMs,
-      ),
-      getActiveSessionsForUsers([...eligibleUserIds]),
-    ]);
-
-    // ── 4. Build response ─────────────────────────────────────────────
-    // Serialise raw shifts for expansion (recurrence.ts works with ISO strings)
-    const eligibleRaw = rawShifts
-      .filter(s => eligibleUserIds.has(s.userId))
-      .map(s => ({
-        ...serialiseShift(s),
-        timeWorkedSeconds: null as number | null,
-        attendanceStatus: null as 'on-time' | 'late' | 'absent' | null,
-      }));
-
-    // Expand recurring roots into per-occurrence entries server-side so that
-    // attendance and time-worked are computed against each occurrence's actual
-    // start/end time (not the root document's original timestamp).
-    const expandedShifts = expandShiftsForWindow(eligibleRaw, weekStartMs, weekEndMs);
-
-    // ── 5. Fetch leave requests falling in the week ───────────────────
-    //
-    // Queried by `occurrenceStart` range, **not** by the shift ids the week
-    // expanded to. A pending request pins the shift id it was submitted
-    // against, and every admin edit path re-homes the occurrence onto a new
-    // document — so an `in` over the current ids is exactly the query that
-    // cannot see the request that needs seeing. `occurrenceStart` is a plain
-    // single-field range (no composite index, and the field is not exempted),
-    // and it is one query instead of a chunked fan-out over 30 ids at a time.
-    type LeaveInfo = { leaveId: string; leaveType: 'paid' | 'unpaid'; status: 'pending' | 'approved' | 'denied'; userId: string; shiftId: string; occurrenceStart: number };
-    const allLeaveDocs: LeaveInfo[] = [];
-
-    {
-      const snap = await adminDb
-        .collection('leave_requests')
-        .where('occurrenceStart', '>=', weekStartMs)
-        .where('occurrenceStart', '<=', weekEndMs)
-        .get();
-      for (const doc of snap.docs) {
-        const d = doc.data();
-        if (!eligibleUserIds.has(d.userId)) continue;
-        allLeaveDocs.push({
-          leaveId: d.leaveId,
-          leaveType: d.leaveType,
-          status: d.status,
-          userId: d.userId,
-          shiftId: d.shiftId,
-          occurrenceStart: d.occurrenceStart,
-        });
-      }
-    }
-
-    // Tiered match rather than a strict tuple lookup — see `leaveMatch.ts` for
-    // why, and for where it deliberately refuses to guess.
-    const leaveMap = matchLeaveToOccurrences(allLeaveDocs, expandedShifts);
-
-    const serialisedShifts = expandedShifts.map(s => {
-      const shiftStartMs = s.occurrenceStart;
-      const shiftEndMs   = s.occurrenceEnd;
-      const isPast       = shiftEndMs <= now;
-      const isCurrent    = shiftStartMs <= now && shiftEndMs > now;
-
-      const sessions       = ledgerByUser.get(s.userId) ?? [];
-      const activeSession  = activeSessions.get(s.userId);
-
-      let timeWorkedSeconds: number | null = null;
-      let attendanceStatus: 'on-time' | 'late' | 'absent' | null = null;
-
-      if (isPast || isCurrent) {
-        const effectiveEnd = isPast ? shiftEndMs : now;
-        timeWorkedSeconds = computeTimeWorked(
-          shiftStartMs, effectiveEnd, sessions, activeSession,
-        );
-        attendanceStatus = computeAttendance(
-          shiftStartMs, shiftEndMs, sessions, activeSession,
-        );
-      }
-
-      const leaveEntry = leaveMap.get(occurrenceKey(s));
-      const leaveRequest = leaveEntry
-        ? { leaveId: leaveEntry.leaveId, leaveType: leaveEntry.leaveType, status: leaveEntry.status }
-        : null;
-
-      return { ...s, timeWorkedSeconds, attendanceStatus, leaveRequest };
+    const { shifts, users } = await loadShiftRoster({
+      windowStartMs: weekStartMs,
+      windowEndMs: weekEndMs,
+      filterUserId,
+      includeDetail: true,
+      includeAllUsers: true,
     });
 
-    const users = [...eligibleUserIds].map(uid => {
-      const u = userMap.get(uid);
-      return {
-        uid,
-        displayName:    u?.displayName    ?? uid,
-        photoURL:       u?.photoURL       ?? null,
-        timezone:       u?.timezone       || 'UTC',
-        enableIdleTimeout: u?.enableIdleTimeout ?? true,
-        groups:         u?.groups         ?? [],
-      };
-    });
-
-    return NextResponse.json({ shifts: serialisedShifts, users });
+    return NextResponse.json({ shifts, users });
   } catch (err) {
     console.error('[shifts/week GET]', err);
     return NextResponse.json({ error: 'Failed to fetch week shifts' }, { status: 500 });

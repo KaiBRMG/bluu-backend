@@ -29,7 +29,7 @@ import { CreatorCombobox } from '@/components/analytics/CreatorCombobox';
 import { AttrChip, BasisTag, FanLabel, InfoTip, LEDGER_NET_NOTE, LEDGER_PPV_ATTRIBUTION, SEGMENT, LEDGER_TIPS_ATTRIBUTION } from '@/components/analytics/analyticsUi';
 import { CreatorChip } from '@/components/creators/CreatorChip';
 import { PersonTag } from '@/components/disputes/disputeUi';
-import { buddyxCreditName, holderName, SaleHolderNote } from '@/components/salary/SaleHolderNote';
+import { holderName, SaleHolderNote } from '@/components/salary/SaleHolderNote';
 import { reassignRefusal } from '@/lib/disputes/disputeRules';
 import { round2 } from '@/lib/salary/salaryEngine';
 import { DEFAULT_DEDUCTION_RATE } from '@/lib/salary/salaryConstants';
@@ -68,8 +68,10 @@ import { statusClassOf } from '@/lib/onlymonster/classify';
  * a whole page.
  *
  * **Bluu Backend is the source of truth for sales.** Each row shows who holds
- * it here *and* who BuddyX credits, with a `SaleHolderNote` wherever the two
- * differ and why (an approved dispute, or an admin). Every later sync keeps a move.
+ * it here, with a `SaleHolderNote` wherever that was changed and why (an
+ * approved dispute, or an admin). Every later sync keeps a move. OnlyMonster
+ * credits no one per sale, so there is no "source credits" column and no
+ * "differs from source" view.
  *
  * **Disputes live here too** (2026-10-19; there is no Disputes tab any more).
  * A dispute needs one approval — the agent holding the sale — and moves the
@@ -128,7 +130,7 @@ interface Focus {
 const SOURCE_NAME = { infloww: 'Infloww', buddyx: 'BuddyX', onlymonster: 'OnlyMonster' } as const;
 
 type KindFilter = 'all' | 'tip' | 'ppv';
-export type SalesView = 'all' | 'unassigned' | 'off-schedule' | 'differs' | 'disputed' | 'removed';
+export type SalesView = 'all' | 'unassigned' | 'off-schedule' | 'disputed' | 'removed';
 type OutcomeFilter = SaleDisputeOutcome | 'all';
 type Period = 'today' | '7d' | 'month' | 'last-month';
 
@@ -136,7 +138,6 @@ const VIEWS: Array<{ value: SalesView; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'unassigned', label: 'Unassigned' },
   { value: 'off-schedule', label: 'Off schedule' },
-  { value: 'differs', label: 'Differs from source' },
   { value: 'disputed', label: 'Disputed' },
   { value: 'removed', label: 'Removed' },
 ];
@@ -157,10 +158,6 @@ function inView(
       return !s.removedAt && !s.userId;
     case 'off-schedule':
       return schedule[s.saleId]?.differs === true;
-    case 'differs':
-      // Moved by a dispute or an admin, or (BuddyX era) credited to the agent on shift rather than BuddyX's chatter.
-      // OnlyMonster rows have no platform credit to differ from: only a move counts.
-      return !s.removedAt && (!s.matchesSource || Boolean(s.transfer) || (s.source !== 'onlymonster' && s.buddyxUserId !== s.userId));
     case 'disputed':
       // Removed rows included: a dispute's outcome is history worth keeping.
       return Boolean(disputes[s.saleId]);
@@ -982,20 +979,6 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                           <td className="max-w-[12rem] px-3 py-2 text-xs">
                             <OnShift match={match} names={data.names} />
                           </td>
-                          <td className="max-w-[12rem] px-3 py-2 text-xs">
-                            {sale.source === 'onlymonster' ? (
-                              <span className="text-zinc-400">—</span>
-                            ) : sale.unmappedChatterId ? (
-                              <span className="text-orange-400">{sale.employeeName || `Chatter ${sale.unmappedChatterId}`} (not linked)</span>
-                            ) : sale.buddyxUserId ? (
-                              <span className="text-zinc-300">
-                                {data.names[sale.buddyxUserId] ?? sale.employeeName}
-                                {sale.attributedBy === 'departed' && <span className="text-zinc-400"> · no longer here</span>}
-                              </span>
-                            ) : (
-                              <span className="text-zinc-400">Unassigned</span>
-                            )}
-                          </td>
                           <td className="px-3 py-2">
                             <span className="flex flex-wrap items-center gap-1.5">
                               <AttrChip>{saleTypeLabel(sale.type)}</AttrChip>
@@ -1167,7 +1150,6 @@ const LEDGER_COLUMNS: Array<{ label: string; right?: boolean; hint?: string; bas
   { label: 'Creator' },
   { label: 'Held by' },
   { label: 'On shift', hint: 'Who the shift schedule had on this account at the time of sale' },
-  { label: 'Source credits', hint: 'Who BuddyX credited, on its (frozen, pre-6 Nov) rows. OnlyMonster reports no per-sale chatter, so its rows leave this empty.' },
   { label: 'Type' },
   { label: 'Fan' },
   { label: 'Gross', right: true, basis: 'gross' },
@@ -1485,12 +1467,6 @@ function ReassignSaleDialog({
             {onShift.length ? onShift.map(uid => nameOf(uid)).join(', ') : <span className="text-zinc-400">Nobody scheduled on this account</span>}
             {schedule[sale.saleId]?.differs && <span className="text-[11px]"> · off schedule</span>}
           </dd>
-          {sale.source !== 'onlymonster' && (
-            <>
-              <dt className="text-zinc-400">{SOURCE_NAME[sale.source]} credits</dt>
-              <dd>{buddyxCreditName(sale, allNames)}</dd>
-            </>
-          )}
           <dt className="text-zinc-400">Sale ID</dt>
           <dd className="font-mono text-xs text-zinc-300">{sale.saleId}</dd>
         </dl>

@@ -856,3 +856,20 @@ It landed as BuddyX rather than OF Manager, and the prediction held: **the engin
 - Both importers are gone (`/api/ca-salary/import`, and the historical import on 2026-10-18), with `SALES_EMAIL_MAP`, `buildUserResolver`, `xlsx.ts` and `salesImport.ts`.
 
 Keep `signedGross` as the only column the engine sums; it is what makes reversals work without a special case.
+
+---
+
+## 14. Shift Calendar (CA Portal) — the schedule by creator
+
+`/ca-portal/shift-calendar` (page id `ca-shift-calendar`, CA Portal teamspace) draws **the same shifts as Shift Management → Schedule with creators as the rows**. Agents read it ("who is on Adam on Thursday?"); admins also fill gaps from it.
+
+**Display only — nothing here feeds pay.** Coverage is a view over `shifts.creatorIds`; the salary engine must never read it.
+
+- **One source of shifts.** `loadShiftRoster` ([`shiftRosterService.ts`](../src/lib/services/shiftRosterService.ts)) was lifted out of `GET /api/shifts/week` and is now shared with `GET /api/ca-shift-calendar`, so the two grids cannot disagree about which shifts exist. `/api/shifts/week` behaves exactly as before.
+- **Two projections, one route.** A `ca-shift-calendar` holder gets only what the grid draws: window, agent (name, photo) and accounts — **no attendance, time worked, leave or recurrence**; those are about a colleague's conduct and stay admin-only. A `shift-management` holder (`canEdit`) gets full occurrences, attendance and leave, and every eligible agent for the picker. `canEdit` is a UI hint; the write routes (`/api/shifts`) enforce `shift-management` themselves. Readers are cached per user in the browser (`private, max-age=60` + `Vary: Authorization`), editors get `no-store` because they refetch after every write. The window is padded a day each side so an overnight shift that began before the week is not read as a gap.
+- **Rows** are every assignable account — creators, AI creators and sub-accounts (`useAssignableAccounts`), a sub-account indented under its parent as its own peer row. An archived account appears only in a week where it still holds a shift.
+- **Coverage** ([`shiftCoverage.ts`](../src/lib/shiftCoverage.ts)): per account and **viewer-timezone day**, shift intervals are clipped to the day (DST-safe, a day can be 23/25h), **merged** (two agents on one account at once is covered once, never summed), and what is left is the uncovered time. **Assumption: every account should be covered 24h a day.** If some creators only need certain hours, gaps need a per-account expected window — a new setting; not built.
+- **A gap in the past is neutral grey; orange means still to fill.** The page band ("N accounts have uncovered hours…", with *Show them*) and the *Hide fully covered* toggle share one predicate: an uncovered stretch from now on (the whole week, if it is over). Approved leave tombstones the occurrence, so released hours correctly appear as a gap.
+- **Editing** reuses `ShiftModal`. An empty cell opens it with the creator assigned (`prefillCreatorId`) and **no employee preselected** — the question is who. A shift on three accounts appears on three rows, so editing it changes all three. Every write invalidates this page's cache, the Schedule's week cache and the affected agents' own calendar cache.
+- **Access:** nobody holds `ca-shift-calendar` until an admin grants it on Admin Portal → Sharing. `shift-management` holders can use the route without it but will not see the sidebar link until it is granted.
+
