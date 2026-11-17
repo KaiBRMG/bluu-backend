@@ -37,6 +37,7 @@ import { getDepartures, getFinalizedMonthsFor, getScheduleOccurrences } from './
 import { resolvedFanNames } from './fanRegistryService';
 import { announceTierCrossings } from './tierNotices';
 import { getOnlyMonsterConfig } from './onlymonsterSyncService';
+import { archiveCutoffsFor } from './creatorArchiveService';
 import { bump, getAllDocs, readTxBuckets, type LedgerContext } from './onlymonsterLedgerService';
 
 const SALES = 'ca-sales';
@@ -130,6 +131,26 @@ export async function derivePayStage(ctx: LedgerContext & { runId?: string }): P
         vanishedAfterFinalise: d.get('vanishedAfterFinalise') === true,
       });
     }
+  }
+
+  // ── Archived accounts: nothing new after the archive instant ──
+  // A sale on an account after it was archived is not imported. Only a sale
+  // with no row yet is skipped: an existing row stays the planner's to keep
+  // current (and to remove if OnlyFans deletes it), because nothing is ever
+  // soft-removed for being inconvenient (rule 9j). Archived accounts are *not*
+  // dropped from `ctx.accounts` — the ledger, analytics and chargebacks against
+  // sales made before the archive all still need them.
+  const archiveCutoffs = await archiveCutoffsFor([...new Set(ctx.accounts.map(a => a.creatorId))]);
+  if (archiveCutoffs.size > 0) {
+    let skipped = 0;
+    for (let i = inputs.length - 1; i >= 0; i--) {
+      const input = inputs[i];
+      const cutoff = archiveCutoffs.get(input.creatorId);
+      if (cutoff === undefined || input.tx.t < cutoff || stored.has(omSaleId(input.platformAccountId, input.txId))) continue;
+      inputs.splice(i, 1);
+      skipped += 1;
+    }
+    if (skipped) bump(ctx, 'derive.skippedArchived', skipped);
   }
 
   // ── Strict shift attribution ──

@@ -1085,6 +1085,13 @@ export interface CreatorFullDocument {
   isActive: boolean;
   isArchived: boolean;
   /**
+   * When `isArchived` last turned true; null/absent when live, or archived
+   * before the field existed. The line after which the account is off the
+   * schedule and its sales are no longer imported — see `creatorArchiveService`.
+   * Index-exempt: nothing queries it.
+   */
+  archivedAt?: Timestamp | null;
+  /**
    * An account chat agents work that has no real person behind it (an AI
    * persona run on OnlyMonster). It exists **only so its sales import** and are
    * credited to the agent on shift, and so it shows on OnlyFans Analytics.
@@ -1146,6 +1153,8 @@ export interface CreatorSubAccountDocument {
   photoThumb?: string | null;
   photoStoragePath?: string | null;
   isArchived: boolean;
+  /** See `CreatorFullDocument.archivedAt`. A parent's archive applies to it too. */
+  archivedAt?: Timestamp | null;
   createdBy: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;

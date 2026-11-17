@@ -182,6 +182,71 @@ function* generateCandidateDates(
   }
 }
 
+// ─── Splitting a series at an instant ────────────────────────────────
+
+/** Where a recurring series must be cut so that nothing before `cutoffMs` changes. */
+export interface SeriesSplit {
+  /** Local date ("YYYY-MM-DD", series timezone) of the first occurrence kept by the new root. */
+  date: string;
+  /** UTC midnight of `date` — the `overrideDate` / `truncateSeriesAt` convention. */
+  overrideDateMs: number;
+  occurrenceStart: number;
+  occurrenceEnd: number;
+  /**
+   * Raw candidates the rule emitted before `date`. Tombstoned dates are included
+   * on purpose: they consumed the rule's `count` exactly as worked ones did, so
+   * this is what a new root's `count` must be reduced by.
+   */
+  before: number;
+}
+
+/** A runaway guard: a malformed rule (`interval: 0`) would otherwise never advance. */
+const MAX_SPLIT_SCAN = 20_000;
+
+/**
+ * The first **raw** occurrence of a recurring root that starts at or after
+ * `cutoffMs`, or `null` when the series emits nothing from then on.
+ *
+ * Raw — from the rule, not the expansion — for two reasons. The split point must
+ * be a real candidate date, so a new root starting there keeps the series' phase
+ * (a fortnightly roster split on an "off" week would flip to the other week).
+ * And `count` is consumed by every candidate, tombstoned or not.
+ *
+ * An occurrence already under way at the cutoff starts *before* it and so stays
+ * with the old root: work in progress is history, not schedule.
+ */
+export function findSeriesSplit(
+  root: {
+    startTimeMs: number;
+    wallClockStart: string;
+    wallClockEnd: string;
+    userTimezone: string;
+    recurrence: ShiftRecurrence;
+  },
+  cutoffMs: number,
+): SeriesSplit | null {
+  const tz = root.userTimezone || 'UTC';
+  const origin = toLocalDateStr(root.startTimeMs, tz);
+  let before = 0;
+  for (const date of generateCandidateDates(origin, root.recurrence, origin, '9999-12-31', tz)) {
+    const start = wallClockToUtcMs(date, root.wallClockStart, tz);
+    if (start >= cutoffMs) {
+      const end = wallClockToUtcMs(date, root.wallClockEnd, tz);
+      const [y, m, d] = date.split('-').map(Number);
+      return {
+        date,
+        overrideDateMs: Date.UTC(y, m - 1, d),
+        occurrenceStart: start,
+        occurrenceEnd: end <= start ? end + 24 * 3_600_000 : end,
+        before,
+      };
+    }
+    before += 1;
+    if (before > MAX_SPLIT_SCAN) return null;
+  }
+  return null;
+}
+
 // ─── Main expansion function ─────────────────────────────────────────
 
 /**

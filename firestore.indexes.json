@@ -503,6 +503,24 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "snips",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "status",
           "order": "ASCENDING"
         },
@@ -1277,6 +1295,16 @@
     {
       "collectionGroup": "creator-subaccounts",
       "fieldPath": "subAccountId",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creator-subaccounts",
+      "fieldPath": "archivedAt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "creators",
+      "fieldPath": "archivedAt",
       "indexes": []
     },
     {

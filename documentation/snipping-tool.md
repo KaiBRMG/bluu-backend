@@ -846,7 +846,7 @@ On the page, the sentinel and the "Load more" button are **the same element**: s
 
 `GET /api/snips` takes optional `from` / `to` — **inclusive UTC epoch milliseconds** on `createdAt`. It has to be server-side: the library is paged 24 at a time, so filtering the loaded rows would hide matches that simply have not been fetched yet. The count (`total`, first page only) carries the same range, so the line reads "24 of 9 in this range" correctly. Malformed or inverted bounds are a **400**, never ignored — a filter that silently fell away would show the whole library under a label saying it was narrowed.
 
-**No new index.** A range on `createdAt` alongside `ownerUid ==` and `status ==` ordered by `createdAt desc` is served by the existing composite index, and the cursor rides the same ordering.
+**It needs its own composite index: `ownerUid ASC, status ASC, createdAt ASC`.** The library's existing index is `createdAt DESC` and does **not** serve the filtered query — production returned `9 FAILED_PRECONDITION: The query requires an index` (a 500 on `GET /api/snips`, shown to the user as "Could not load your snips") until this one existed. Without it only the filtered path fails; the unfiltered library keeps working, which is how it shipped unnoticed. Deploy with `firebase deploy --only firestore:indexes`; the filter returns 500s until the index finishes building.
 
 **Days are the viewer's days.** The picker holds `YYYY-MM-DD` strings in the viewer's timezone — the zone every card renders its date in — and the page resolves them with `getDayBoundsUTC` when it builds the request, so the server never learns a zone. Held as strings, not instants, so the filter keeps its meaning if the zone resolves late.
 

@@ -18,7 +18,8 @@ import { withAuth } from '@/lib/middleware/withAuth';
 import { invalidateAdminCreatorsCache } from '@/app/api/admin/creators/route';
 import { handleApiError, checkPageAccess } from '@/lib/middleware/apiHelpers';
 import { adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { invalidateOpenArchivedCache, removeArchivedAccountsFromSchedule } from '@/lib/services/creatorArchiveService';
 import { subAccountStageName } from '@/lib/services/creatorAccountService';
 import type { CreatorFullDocument, CreatorSubAccountDocument } from '@/types/firestore';
 import { parsePlatformField } from '@/lib/creators/accountPlatform';
@@ -85,11 +86,42 @@ export const PATCH = withAuth(async (
     }
 
     if (typeof body.OFID === 'string') patch.OFID = body.OFID.trim();
-    if (typeof body.isArchived === 'boolean') patch.isArchived = body.isArchived;
+    // The archive instant — stamped once on the transition, cleared on restore.
+    // See `creatorArchiveService` for what it decides.
+    let archivedAtMs: number | null = null;
+    if (typeof body.isArchived === 'boolean') {
+      patch.isArchived = body.isArchived;
+      const existing = snap.get('archivedAt') as Timestamp | undefined;
+      if (body.isArchived && current.isArchived && existing) {
+        archivedAtMs = existing.toMillis();
+      } else if (body.isArchived) {
+        archivedAtMs = Date.now();
+        patch.archivedAt = Timestamp.fromMillis(archivedAtMs);
+      } else {
+        patch.archivedAt = null;
+      }
+    }
     if (parsedPlatform.value) patch.platform = parsedPlatform.value;
 
     await ref.update(patch);
     invalidateAdminCreatorsCache();
+    if (typeof body.isArchived === 'boolean') invalidateOpenArchivedCache();
+
+    // Off every shift not yet started, and off the overtime board. Non-fatal
+    // and re-runnable, exactly as for a creator.
+    if (archivedAtMs !== null) {
+      try {
+        const schedule = await removeArchivedAccountsFromSchedule({
+          accountIds: [subAccountId],
+          cutoffMs: archivedAtMs,
+          actorUid: token.uid,
+        });
+        return NextResponse.json({ success: true, schedule });
+      } catch (err) {
+        console.error('[subaccounts PATCH] schedule cleanup failed', err);
+        return NextResponse.json({ success: true, scheduleError: 'The sub-account was archived, but could not be removed from upcoming shifts. Remove it in Shift Management.' });
+      }
+    }
     return NextResponse.json({ success: true });
   } catch (err) {
     return handleApiError(err, 'admin/creators/subaccounts PATCH');

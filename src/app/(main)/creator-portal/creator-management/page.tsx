@@ -115,6 +115,26 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
   return `${fallback} (${res.status})`;
 }
 
+/** What an archive reports about the schedule — see `creatorArchiveService`. */
+interface ArchiveResponse {
+  schedule?: { offersCancelled: number; shiftsUpdated: number; shiftsDeleted: number; seriesSplit: number; shiftsLeftEmpty: number };
+  scheduleError?: string;
+}
+
+/**
+ * One line on what archiving did to the roster. Says nothing when nothing was
+ * touched. Names the empty shifts, because those need an admin to re-assign them.
+ */
+function describeScheduleCleanup(s: ArchiveResponse['schedule']): string | undefined {
+  if (!s) return undefined;
+  const shifts = s.shiftsUpdated + s.shiftsDeleted + s.seriesSplit;
+  const parts: string[] = [];
+  if (shifts > 0) parts.push(`Removed from ${shifts} upcoming ${shifts === 1 ? 'shift or roster' : 'shifts and rosters'}`);
+  if (s.offersCancelled > 0) parts.push(`${s.offersCancelled} overtime ${s.offersCancelled === 1 ? 'offer' : 'offers'} withdrawn`);
+  if (s.shiftsLeftEmpty > 0) parts.push(`${s.shiftsLeftEmpty} ${s.shiftsLeftEmpty === 1 ? 'shift now has' : 'shifts now have'} no account — re-assign in Shift Management`);
+  return parts.length ? `${parts.join(' · ')}.` : undefined;
+}
+
 /**
  * Mint a one-time Telegram connection link. Minting voids any previous
  * outstanding link for this creator — it is not idempotent, it revokes. The link
@@ -840,7 +860,9 @@ export default function CreatorManagementPage() {
         toast.error(await errorMessage(res, failure));
         return false;
       }
-      toast.success(success);
+      const body = (await res.json().catch(() => null)) as ArchiveResponse | null;
+      if (body?.scheduleError) toast.warning(success, { description: body.scheduleError });
+      else toast.success(success, { description: describeScheduleCleanup(body?.schedule) });
       await fetchCreators();
       refreshCreators();
       return true;

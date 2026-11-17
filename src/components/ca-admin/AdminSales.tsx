@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, Sele
 import { EllipsisPagination } from '@/components/EllipsisPagination';
 import { useAuth } from '@/components/AuthProvider';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
+import { useOpenArchivedCreators } from '@/hooks/useOpenArchivedCreators';
 import { useUserData } from '@/hooks/useUserData';
 import { activeChatAgents, useBasicUsers } from '@/hooks/useBasicUsers';
 import { SALARY_HISTORY_START_MONTH } from '@/lib/salary/salaryConstants';
@@ -236,6 +237,8 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
   const [outcome, setOutcome] = useState<OutcomeFilter>('all');
   const [agent, setAgent] = useState('all');
   const [creatorId, setCreatorId] = useState<string | null>(null);
+  // Archived creators stay filterable until their archive month is finalised.
+  const openArchivedIds = useOpenArchivedCreators();
   const [kind, setKind] = useState<KindFilter>('all');
   const [focus, setFocus] = useState<Focus | null>(null);
   const [query, setQuery] = useState('');
@@ -774,7 +777,7 @@ export default function AdminSales({ timezone, initialView = 'all' }: { timezone
                   {agents.map(a => <SelectItem key={a.uid} value={a.uid}>{a.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <CreatorCombobox value={creatorId} onChange={setCreatorId} allLabel="All creators" />
+              <CreatorCombobox value={creatorId} onChange={setCreatorId} allLabel="All creators" includeArchivedIds={openArchivedIds} />
               <ToggleGroup type="single" variant="outline" size="sm" value={kind} onValueChange={v => v && setKind(v as KindFilter)} aria-label="Kind">
                 <ToggleGroupItem value="all" className={SEGMENT}>All</ToggleGroupItem>
                 <ToggleGroupItem value="tip" className={SEGMENT}>Tips</ToggleGroupItem>

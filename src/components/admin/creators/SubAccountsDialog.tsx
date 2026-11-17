@@ -112,7 +112,11 @@ export function SubAccountsDialog({ creator, onClose, onChanged, apiRequest }: S
         setError(message);
         return false;
       }
-      toast.success(success);
+      // An archive also takes the account off upcoming shifts; if that half
+      // failed, the archive still stands and the message says where to finish it.
+      const body = (await res.json().catch(() => null)) as { scheduleError?: string } | null;
+      if (body?.scheduleError) toast.warning(success, { description: body.scheduleError });
+      else toast.success(success);
       await load();
       refreshCreators();
       onChanged?.();

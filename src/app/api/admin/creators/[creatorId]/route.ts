@@ -4,7 +4,12 @@ import { adminAuth, adminDb, adminStorage } from '@/lib/firebase-admin';
 import { getUserById } from '@/lib/services/userService';
 import { invalidateAdminCreatorsCache } from '@/app/api/admin/creators/route';
 import { releaseTelegramIndexEntries } from '@/lib/services/telegramLinkService';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import {
+  accountIdsForCreatorArchive,
+  invalidateOpenArchivedCache,
+  removeArchivedAccountsFromSchedule,
+} from '@/lib/services/creatorArchiveService';
 import { parsePlatformField } from '@/lib/creators/accountPlatform';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -48,19 +53,40 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken, 
       }
     }
 
+    // Only read the doc when something below needs it: reactivating (the AI
+    // creator check) or an archive change (the archive instant).
+    const archiving = body.isArchived === true;
+    const restoring = body.isArchived === false;
+    const snap = body.isActive === true || archiving || restoring
+      ? await adminDb.collection('creators').doc(creatorId).get()
+      : null;
+    if (snap && !snap.exists) return NextResponse.json({ error: 'Creator not found' }, { status: 404 });
+
+    // The archive instant. Stamped once, on the transition — re-archiving must
+    // not move it, because it is the line between sales that are imported and
+    // shifts that keep the account, and those that do not. Cleared on restore.
+    let archivedAtMs: number | null = null;
+    if (archiving) {
+      const existing = snap!.get('archivedAt') as Timestamp | undefined;
+      if (snap!.get('isArchived') === true && existing) {
+        archivedAtMs = existing.toMillis();
+      } else {
+        archivedAtMs = Date.now();
+        firestoreUpdate.archivedAt = Timestamp.fromMillis(archivedAtMs);
+      }
+    } else if (restoring) {
+      firestoreUpdate.archivedAt = null;
+    }
+
     // Build a single Auth update to avoid redundant sequential calls
     const authUpdate: { disabled?: boolean } = {};
     if ('isActive' in body) {
       authUpdate.disabled = !body.isActive;
       // An AI creator's Auth account stays disabled whatever `isActive` says —
-      // there is nobody to sign in. Only read the doc when reactivation could
-      // otherwise enable it.
-      if (body.isActive === true) {
-        const snap = await adminDb.collection('creators').doc(creatorId).get();
-        if (snap.get('isAiCreator') === true) authUpdate.disabled = true;
-      }
+      // there is nobody to sign in.
+      if (body.isActive === true && snap?.get('isAiCreator') === true) authUpdate.disabled = true;
     }
-    if (body.isArchived === true) authUpdate.disabled = true;
+    if (archiving) authUpdate.disabled = true;
 
     await Promise.all([
       adminDb.collection('creators').doc(creatorId).update(firestoreUpdate),
@@ -69,6 +95,25 @@ export const PUT = withAuth(async (request: NextRequest, token: DecodedIdToken, 
         : Promise.resolve(),
     ]);
     invalidateAdminCreatorsCache();
+    if (archiving || restoring) invalidateOpenArchivedCache();
+
+    // Take the account (and its sub-accounts) off every shift not yet started,
+    // and off the overtime board. After the archive itself and non-fatal: the
+    // archive has happened either way. The cleanup is safe to re-run; a repeat
+    // archive request keeps the original instant.
+    if (archivedAtMs !== null) {
+      try {
+        const schedule = await removeArchivedAccountsFromSchedule({
+          accountIds: await accountIdsForCreatorArchive(creatorId),
+          cutoffMs: archivedAtMs,
+          actorUid: token.uid,
+        });
+        return NextResponse.json({ success: true, schedule });
+      } catch (err) {
+        console.error('[PUT /api/admin/creators/[creatorId]] schedule cleanup failed', err);
+        return NextResponse.json({ success: true, scheduleError: 'The creator was archived, but could not be removed from upcoming shifts. Remove them in Shift Management.' });
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

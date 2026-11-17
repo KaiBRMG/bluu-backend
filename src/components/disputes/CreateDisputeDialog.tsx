@@ -38,6 +38,7 @@ import { SEGMENT_ITEM_CLASS } from '@/components/growth/growthUi';
 import { DatePicker } from '@/components/smm/shared/DatePicker';
 import { useAuth } from '@/components/AuthProvider';
 import { useMappedCreators } from '@/hooks/useMappedCreators';
+import { useOpenArchivedCreators } from '@/hooks/useOpenArchivedCreators';
 import { useAuthFetch } from '@/hooks/useAuthFetch';
 import { CreatorCombobox } from '@/components/analytics/CreatorCombobox';
 import { CreatorChip } from '@/components/creators/CreatorChip';
@@ -86,6 +87,8 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
   const { user } = useAuth();
   const authFetch = useAuthFetch();
   const mappedCreatorIds = useMappedCreators();
+  // An archived creator's sales stay disputable until its archive month is finalised.
+  const openArchivedIds = useOpenArchivedCreators();
 
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [from, setFrom] = useState<Date | undefined>(() => new Date());
@@ -232,7 +235,7 @@ export function CreateDisputeDialog({ open, onOpenChange, timezone, onSubmitted 
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1">
             <Label className="text-xs text-zinc-400">Creator</Label>
-            <CreatorCombobox value={creatorId} onChange={setCreatorId} allowedIds={mappedCreatorIds} placeholder="Pick a creator" />
+            <CreatorCombobox value={creatorId} onChange={setCreatorId} allowedIds={mappedCreatorIds} includeArchivedIds={openArchivedIds} placeholder="Pick a creator" />
           </div>
           <div className="flex flex-col gap-1">
             <Label className="text-xs text-zinc-400">From</Label>

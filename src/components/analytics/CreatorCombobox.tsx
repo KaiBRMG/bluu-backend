@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { CreatorChip } from '@/components/creators/CreatorChip';
-import { useCreators } from '@/hooks/useCreators';
+import { useCreatorMap, useCreators } from '@/hooks/useCreators';
 
 /**
  * Pick one creator (or sub-account) from the shared roster — Popover + Command,
@@ -23,6 +23,7 @@ export function CreatorCombobox({
   placeholder = 'Pick a creator',
   className,
   ariaLabel = 'Creator',
+  includeArchivedIds,
 }: {
   value: string | null;
   onChange: (creatorId: string | null) => void;
@@ -31,15 +32,25 @@ export function CreatorCombobox({
   placeholder?: string;
   className?: string;
   ariaLabel?: string;
+  /**
+   * Archived creators to offer anyway — the sale pickers keep an archived
+   * creator until its archive month is finalised, so its sales stay
+   * disputable (`useOpenArchivedCreators`). Still narrowed by `allowedIds`.
+   */
+  includeArchivedIds?: string[];
 }) {
   const creators = useCreators();
+  const creatorMap = useCreatorMap();
   const [open, setOpen] = useState(false);
   const options = useMemo(() => {
     const allowed = allowedIds ? new Set(allowedIds) : null;
-    return creators
-      .filter(c => (!allowed || allowed.has(c.creatorID)) && !(c as { isArchived?: boolean }).isArchived)
+    const archived = (includeArchivedIds ?? [])
+      .map(id => creatorMap.get(id))
+      .filter((c): c is NonNullable<typeof c> => !!c && c.isArchived === true && !c.isSubAccount);
+    return [...creators.filter(c => !c.isArchived), ...archived]
+      .filter(c => !allowed || allowed.has(c.creatorID))
       .sort((a, b) => a.stageName.localeCompare(b.stageName));
-  }, [creators, allowedIds]);
+  }, [creators, creatorMap, allowedIds, includeArchivedIds]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

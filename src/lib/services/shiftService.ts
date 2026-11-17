@@ -86,8 +86,16 @@ function normaliseRecurrence(r: ShiftRecurrence | null | undefined): ShiftRecurr
  */
 export async function createShift(input: CreateShiftInput): Promise<string> {
   const ref = adminDb.collection(SHIFTS).doc();
-  const shiftId = ref.id;
+  await ref.set(newRootShiftDoc(ref.id, input));
+  return ref.id;
+}
 
+/**
+ * The document `createShift` writes, for a caller that must put it in a batch
+ * with other writes (splitting a series is truncate + create + re-point, and a
+ * half-applied split shows an occurrence twice or not at all).
+ */
+export function newRootShiftDoc(shiftId: string, input: CreateShiftInput) {
   const doc: Omit<ShiftDocument, 'createdAt' | 'updatedAt'> & {
     createdAt: ReturnType<typeof FieldValue.serverTimestamp>;
     updatedAt: ReturnType<typeof FieldValue.serverTimestamp>;
@@ -113,9 +121,7 @@ export async function createShift(input: CreateShiftInput): Promise<string> {
     coverageOfferId: input.coverageOfferId ?? null,
     paysWage: input.paysWage ?? true,
   };
-
-  await ref.set(doc);
-  return shiftId;
+  return doc;
 }
 
 /**
@@ -257,12 +263,17 @@ export async function truncateSeriesAt(
   seriesId: string,
   newEndDateMs: number,   // UTC ms of the last occurrence to KEEP (exclusive — day before this becomes endDate)
 ): Promise<void> {
+  await adminDb.collection(SHIFTS).doc(seriesId).update(truncateSeriesPatch(newEndDateMs));
+}
+
+/** The update `truncateSeriesAt` applies, for a caller writing it inside a batch. */
+export function truncateSeriesPatch(newEndDateMs: number): Record<string, unknown> {
   // Set endDate to midnight of the day BEFORE newEndDateMs
   const dayBeforeMs = newEndDateMs - 24 * 60 * 60 * 1000;
-  await adminDb.collection(SHIFTS).doc(seriesId).update({
+  return {
     'recurrence.endDate': Timestamp.fromMillis(dayBeforeMs),
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  };
 }
 
 // ─── Reads ───────────────────────────────────────────────────────────

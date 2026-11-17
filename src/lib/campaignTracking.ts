@@ -214,7 +214,8 @@ export interface Creator {
   parentStageName?: string | null;
   /**
    * Archived (for a sub-account: it or its parent). Only `useCreatorMap` holds
-   * these — history must still name them; pickers never offer them.
+   * these — history must still name them; pickers never offer them, except the
+   * sale pickers until the archive month is finalised (`useOpenArchivedCreators`).
    */
   isArchived?: boolean;
   /**
