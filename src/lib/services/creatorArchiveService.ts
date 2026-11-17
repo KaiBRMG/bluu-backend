@@ -22,7 +22,7 @@
 import 'server-only';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { adminDb } from '../firebase-admin';
-import { newRootShiftDoc, truncateSeriesPatch } from './shiftService';
+import { commitSeriesSplit, getLeaveForSplit } from './shiftService';
 import { cancelOffer } from './caCoverageService';
 import { getFinalizedMonthsFor } from './caSalaryService';
 import { planArchiveShifts, type PlanLeave, type PlanShift } from '../creators/archiveShiftPlan';
@@ -31,7 +31,6 @@ import type { CaCoverageOfferDocument, ShiftDocument } from '@/types/firestore';
 
 const SHIFTS = 'shifts';
 const OFFERS = 'ca-coverage-offers';
-const LEAVE = 'leave_requests';
 const CREATORS = 'creators';
 const SUBACCOUNTS = 'creator-subaccounts';
 const DAY_MS = 24 * 3_600_000;
@@ -149,31 +148,18 @@ export async function removeArchivedAccountsFromSchedule(params: {
   // `occurrenceStart` is indexed (the balance and roster reads use it);
   // `releasedShiftId` is not, so it is matched in the planner. A week's
   // slack covers an occurrence the release resolved away from its pin.
-  let leaves: PlanLeave[] = [];
-  if (roots.length > 0) {
-    const leaveSnap = await adminDb.collection(LEAVE).where('occurrenceStart', '>=', cutoffMs - 7 * DAY_MS).get();
-    leaves = leaveSnap.docs.map(d => ({
-      leaveId: d.id,
-      status: d.get('status'),
-      shiftId: d.get('shiftId'),
-      occurrenceStart: d.get('occurrenceStart'),
-      releasedShiftId: d.get('releasedShiftId') ?? null,
-      releasedOccurrenceStart: d.get('releasedOccurrenceStart') ?? null,
-    }));
-  }
+  const leaves: PlanLeave[] = roots.length > 0 ? await getLeaveForSplit(cutoffMs) : [];
 
   const plan = planArchiveShifts({ accountIds, cutoffMs, shifts: [...byId.values()], leaves });
   report.shiftsLeftEmpty = plan.emptied.length;
 
   // ── Splits: one batch each, because half a split is worse than none ──
   for (const split of plan.splits) {
-    const batch = adminDb.batch();
-    const newRef = adminDb.collection(SHIFTS).doc();
     const r = split.newRoot;
-    batch.update(adminDb.collection(SHIFTS).doc(split.rootId), truncateSeriesPatch(split.truncateAtMs));
-    batch.set(
-      newRef,
-      newRootShiftDoc(newRef.id, {
+    await commitSeriesSplit({
+      rootId: split.rootId,
+      truncateAtMs: split.truncateAtMs,
+      newRoot: {
         userId: r.userId,
         startTime: r.startMs,
         endTime: r.endMs,
@@ -187,22 +173,10 @@ export async function removeArchivedAccountsFromSchedule(params: {
         isOvertime: r.isOvertime,
         coverageOfferId: r.coverageOfferId,
         paysWage: r.paysWage,
-      }),
-    );
-    for (const o of split.repoint) {
-      batch.update(adminDb.collection(SHIFTS).doc(o.shiftId), {
-        seriesId: newRef.id,
-        ...(o.patch ?? {}),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
-    for (const l of split.leaves) {
-      batch.update(adminDb.collection(LEAVE).doc(l.leaveId), {
-        releasedShiftId: newRef.id,
-        releasedOccurrenceStart: l.releasedOccurrenceStart,
-      });
-    }
-    await batch.commit();
+      },
+      repoint: split.repoint.map(o => ({ shiftId: o.shiftId, patch: o.patch ? { ...o.patch } : null })),
+      leaves: split.leaves,
+    });
     report.seriesSplit += 1;
   }
 

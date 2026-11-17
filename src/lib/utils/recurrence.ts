@@ -215,22 +215,36 @@ const MAX_SPLIT_SCAN = 20_000;
  * An occurrence already under way at the cutoff starts *before* it and so stays
  * with the old root: work in progress is history, not schedule.
  */
-export function findSeriesSplit(
-  root: {
-    startTimeMs: number;
-    wallClockStart: string;
-    wallClockEnd: string;
-    userTimezone: string;
-    recurrence: ShiftRecurrence;
-  },
-  cutoffMs: number,
-): SeriesSplit | null {
+export function findSeriesSplit(root: SplittableRoot, cutoffMs: number): SeriesSplit | null {
+  const tz = root.userTimezone || 'UTC';
+  return firstCandidateWhere(root, (date) => wallClockToUtcMs(date, root.wallClockStart, tz) >= cutoffMs);
+}
+
+/**
+ * The same split, chosen by **date** rather than instant: the first raw
+ * occurrence on or after the local date `dateStr` ("YYYY-MM-DD", series
+ * timezone). This is "edit this and future" — the admin picked an occurrence,
+ * not a moment.
+ */
+export function findSeriesSplitAtDate(root: SplittableRoot, dateStr: string): SeriesSplit | null {
+  return firstCandidateWhere(root, (date) => date >= dateStr);
+}
+
+export interface SplittableRoot {
+  startTimeMs: number;
+  wallClockStart: string;
+  wallClockEnd: string;
+  userTimezone: string;
+  recurrence: ShiftRecurrence;
+}
+
+function firstCandidateWhere(root: SplittableRoot, isSplit: (date: string) => boolean): SeriesSplit | null {
   const tz = root.userTimezone || 'UTC';
   const origin = toLocalDateStr(root.startTimeMs, tz);
   let before = 0;
   for (const date of generateCandidateDates(origin, root.recurrence, origin, '9999-12-31', tz)) {
-    const start = wallClockToUtcMs(date, root.wallClockStart, tz);
-    if (start >= cutoffMs) {
+    if (isSplit(date)) {
+      const start = wallClockToUtcMs(date, root.wallClockStart, tz);
       const end = wallClockToUtcMs(date, root.wallClockEnd, tz);
       const [y, m, d] = date.split('-').map(Number);
       return {

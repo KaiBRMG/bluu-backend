@@ -2,18 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { getUserById } from '@/lib/services/userService';
 import {
-  createShift,
   updateShift,
   deleteShift,
   deleteShiftSeries,
   createOccurrenceOverride,
   deleteOccurrence,
   truncateSeriesAt,
+  commitSeriesSplit,
+  getLeaveForSplit,
 } from '@/lib/services/shiftService';
 import { adminDb } from '@/lib/firebase-admin';
+import type { Timestamp } from 'firebase-admin/firestore';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { normaliseAccountIds, intersectOvertimeIds } from '@/lib/services/creatorAccountService';
-import type { ShiftDocument } from '@/types/firestore';
+import { findSeriesSplitAtDate } from '@/lib/utils/recurrence';
+import { docsMovedBySplit, leavesMovedBySplit, remainingCount } from '@/lib/shifts/seriesSplitPlan';
+import type { ShiftDocument, ShiftRecurrence } from '@/types/firestore';
 import { queueOvertimeAssignedForShift } from '@/lib/services/coverageNotices';
 
 // ─── PUT /api/shifts/[shiftId] ───────────────────────────────────────
@@ -116,30 +120,97 @@ export const PUT = withAuth(async (
         },
       );
     } else if (existing.isRecurring && saveMode === 'future') {
-      // Truncate the existing series at the overrideDate, then create a new root shift
+      // Split the series at the chosen occurrence: the old root stops the day
+      // before, a new root carries the edit from there. A real split, not just
+      // truncate + create: `count` carries over, and the exceptions and released
+      // leave dated from the split move with it (see `seriesSplitPlan.ts`).
       if (!overrideDate) {
         return NextResponse.json({ error: 'overrideDate required for future edit' }, { status: 400 });
       }
       const overrideDateMs = new Date(overrideDate).getTime();
-      const rootId = existing.seriesId ?? shiftId;
+      if (!Number.isFinite(overrideDateMs) || existing.seriesId || !existing.recurrence) {
+        // "This and future" is only offered on an occurrence of a root.
+        return NextResponse.json({ error: 'This shift cannot be edited from this date onward' }, { status: 400 });
+      }
+      const rootId = shiftId;
 
-      await truncateSeriesAt(rootId, overrideDateMs);
+      // `overrideDate` is UTC midnight of the occurrence's local date.
+      const chosenDate = new Date(overrideDateMs).toISOString().slice(0, 10);
+      const split = findSeriesSplitAtDate(
+        {
+          startTimeMs: existing.startTime.toMillis(),
+          wallClockStart: existing.wallClockStart,
+          wallClockEnd: existing.wallClockEnd,
+          userTimezone: existing.userTimezone,
+          recurrence: existing.recurrence,
+        },
+        chosenDate,
+      );
+      if (!split || split.date !== chosenDate) {
+        return NextResponse.json(
+          { error: 'That occurrence is no longer part of this series. Reload the page and try again.' },
+          { status: 409 },
+        );
+      }
 
-      // Create a new root recurring shift starting from the overrideDate
-      await createShift({
-        userId:         userId         ?? existing.userId,
-        startTime:      startMs        ?? existing.startTime.toMillis(),
-        endTime:        endMs          ?? existing.endTime.toMillis(),
-        wallClockStart: wallClockStart ?? existing.wallClockStart,
-        wallClockEnd:   wallClockEnd   ?? existing.wallClockEnd,
-        userTimezone:   userTimezone   ?? existing.userTimezone,
-        createdBy:      token.uid,
-        recurrence:     recurrence !== undefined ? recurrence : existing.recurrence,
-        creatorIds:     assignedCreatorIds ?? existing.creatorIds ?? [],
-        overtimeCreatorIds: assignedOvertimeIds ?? existing.overtimeCreatorIds ?? [],
-        isOvertime:     existing.isOvertime ?? false,
-        coverageOfferId: existing.coverageOfferId ?? null,
-        paysWage:       existing.paysWage ?? true,
+      // A count is the series' total, so the new root runs what is left of it.
+      let newRecurrence = (recurrence !== undefined ? recurrence : existing.recurrence) as ShiftRecurrence | null;
+      if (newRecurrence && typeof newRecurrence.count === 'number') {
+        const remaining = remainingCount(newRecurrence.count, split.before);
+        if (remaining === null || remaining <= 0) {
+          return NextResponse.json(
+            {
+              error:
+                `This series has already run ${split.before} occurrence${split.before === 1 ? '' : 's'} before this date, ` +
+                `so ending after ${newRecurrence.count} leaves none from here. Raise the count, or delete this and future shifts instead.`,
+            },
+            { status: 400 },
+          );
+        }
+        newRecurrence = { ...newRecurrence, count: remaining, parentShiftId: null };
+      }
+
+      // Handing the series to another agent? The outgoing agent's own edits,
+      // deletions and released leave stay on their series, not the new one.
+      const newAgent = userId ?? existing.userId;
+      const outgoingAgent = newAgent !== existing.userId ? existing.userId : undefined;
+
+      const [overridesSnap, leaves] = await Promise.all([
+        adminDb.collection('shifts').where('seriesId', '==', rootId).get(),
+        getLeaveForSplit(split.occurrenceStart),
+      ]);
+      const moved = docsMovedBySplit(
+        overridesSnap.docs.map(d => ({
+          shiftId: d.id,
+          userId: d.get('userId') as string,
+          seriesId: d.get('seriesId') as string | null,
+          overrideDateMs: (d.get('overrideDate') as Timestamp | null)?.toMillis() ?? null,
+        })),
+        rootId,
+        split.overrideDateMs,
+        outgoingAgent,
+      );
+
+      await commitSeriesSplit({
+        rootId,
+        truncateAtMs: split.overrideDateMs,
+        newRoot: {
+          userId:         newAgent,
+          startTime:      startMs        ?? split.occurrenceStart,
+          endTime:        endMs          ?? split.occurrenceEnd,
+          wallClockStart: wallClockStart ?? existing.wallClockStart,
+          wallClockEnd:   wallClockEnd   ?? existing.wallClockEnd,
+          userTimezone:   userTimezone   ?? existing.userTimezone,
+          createdBy:      token.uid,
+          recurrence:     newRecurrence,
+          creatorIds:     assignedCreatorIds ?? existing.creatorIds ?? [],
+          overtimeCreatorIds: assignedOvertimeIds ?? existing.overtimeCreatorIds ?? [],
+          isOvertime:     existing.isOvertime ?? false,
+          coverageOfferId: existing.coverageOfferId ?? null,
+          paysWage:       existing.paysWage ?? true,
+        },
+        repoint: moved.map(o => ({ shiftId: o.shiftId })),
+        leaves: leavesMovedBySplit(leaves, rootId, split.occurrenceStart, outgoingAgent),
       });
     } else {
       // Plain update (non-recurring, or updating the whole series)

@@ -113,7 +113,7 @@ Archiving a creator (`PUT /api/admin/creators/[id]`) or a sub-account (`PATCH �
 
 - **The schedule lets go of it.** Every shift that *starts* at or after `archivedAt` loses the account (and its overtime mark); every shift that started before keeps it, **including one under way at the archive instant** — that is worked time, and pay is priced on it. The decision is the pure [`archiveShiftPlan.ts`](../src/lib/creators/archiveShiftPlan.ts) (tested in `archiveShiftPlan.test.ts`):
   - A one-off or override is patched. A shift **coverage built** that is left empty is deleted (the `detachAccountFromShift` rule); a **rostered** shift left empty is kept and counted, and the archive toast tells the admin to re-assign it — deleting it would delete somebody's working day.
-  - A recurring series not yet started is patched in place. One **under way** is **split** like "edit this and future" (§6, *A leave request is a pinned tuple*): truncated before the first raw occurrence at/after `archivedAt`, a new root carrying the rest without the account — and, unlike the PUT path, it also (a) reduces `count` by the occurrences already emitted, (b) re-points override and tombstone docs on/after the split to the new root, and (c) moves `releasedShiftId` on approved leave released on those dates, so an approved absence still suppresses its day and a withdrawal still finds its tombstone. Each split is one batch.
+  - A recurring series not yet started is patched in place. One **under way** is **split** like "edit this and future" (§6, *A leave request is a pinned tuple*): truncated before the first raw occurrence at/after `archivedAt`, a new root carrying the rest without the account. It is the same split as the PUT path (see *Splitting a series* in §6), with one addition: overrides on/after `archivedAt` lose the account as they are re-pointed.
   - Open **overtime-board offers** for the account from `archivedAt` on are cancelled (`cancelOffer`, which also detaches it from the shift an assigned offer created).
   - **A creator's archive takes its sub-accounts with it** (pickers already treat them as archived); a sub-account's archive takes only itself.
   - The cleanup runs after the archive write and is **non-fatal**: on failure the archive stands, the route returns `scheduleError`, and the admin finishes it in Shift Management.
@@ -224,7 +224,7 @@ A request records `(shiftId, occurrenceStart)` at the moment it is submitted. **
 | Edit in `PUT /api/shifts/[shiftId]` | What happens to the occurrence |
 |---|---|
 | `saveMode: 'single'` | A **new override doc** holds it, carrying the new `creatorIds`; the root keeps the old ones |
-| `saveMode: 'future'` | The series is truncated and a **new root** is created, with a new id |
+| `saveMode: 'future'` | The series is **split**: truncated before the chosen occurrence and a **new root** created, with a new id (see *Splitting a series* below) |
 | delete + recreate | A new document id entirely |
 
 The release used to read `shifts/{leave.shiftId}` directly, which after any of those reads the **stale** document. That produced both halves of a real failure: accounts added in the edit never reached the overtime board, and the tombstone landed on a series that no longer expanded that date, so the shift stayed on the calendar after the leave was approved.
@@ -238,6 +238,18 @@ The release used to read `shifts/{leave.shiftId}` directly, which after any of t
 **The release records where it landed.** `releasedShiftId` / `releasedOccurrenceStart` are written onto the leave document by the approve route, and `revertOccurrenceCoverage` restores **that** document. Restoring the pinned one instead would un-delete a shift nobody released and leave the released one tombstoned. Both fields are index-exempt (rule 9); requests approved before this shipped simply fall back to the pinned pair.
 
 > **Do not "fix" this by storing a creator → agent map.** It was considered and rejected: a map keyed by agent answers *which accounts does this agent work*, while release needs *which accounts was this agent covering on this occurrence*. Those differ whenever a roster is not identical day to day, and the difference is money — a released account the absent agent was not covering that day still creates an offer somebody gets paid to cover. The assignment is already on the shift; derive it from there on read (rule 9f's posture, applied to rostering).
+
+### Splitting a series (2026-11-17)
+
+"Edit this and future" and archiving an account both split a recurring series. Truncating the root and creating a new one is **not** a split on its own, and until 2026-11-17 that was all the PUT path did. Three more things are required, and both callers share them ([`seriesSplitPlan.ts`](../src/lib/shifts/seriesSplitPlan.ts) for the decisions, `commitSeriesSplit` in [shiftService.ts](../src/lib/services/shiftService.ts) for the write):
+
+1. **`count` is the series' total.** The new root gets `count − occurrences the old root already emitted` (`findSeriesSplitAtDate` / `findSeriesSplit` count raw candidates, tombstoned ones included, because they consumed the count too). Without this, a 10-occurrence roster edited at its 5th ran 10 more. The PUT path applies this to the count the admin submits, so an admin who *lowers* the count to or below what has already run gets a 400 rather than an empty series.
+2. **Overrides and tombstones dated on/after the split are re-pointed** to the new root (`seriesId`). They keep their own times, agent and accounts — an edit to one day survives an edit to the series. Left behind, an edited day showed twice (the stranded override plus the new root's copy) and a deleted or leave-released day came back.
+3. **Approved leave that released one of those dates has `releasedShiftId` moved** to the new root, or a withdrawal looks for its tombstone under the old root and never restores the shift. Leave that released an *override* needs nothing: the override keeps its id.
+
+**When the edit also hands the series to another agent (A → B)**, A's own overrides, tombstones and approved leave are *not* moved — they stay on A's truncated series. Moved, A's leave tombstone would hide a day of B's nobody released and A's edited day would replace B's. A day of A's already given to a third agent C (an override with `userId: C`) still moves, so C keeps it rather than sharing it with B. Leave moves exactly when its tombstone does (both carry the absent agent's `userId`).
+
+The write is **one batch** (truncate, create, re-point, move leave) — half a split is worse than none — and refuses a split larger than a batch rather than writing it in pieces. The PUT path also refuses (409) an occurrence date the series no longer emits, i.e. a stale page.
 
 ### The two kinds of overtime pay differently
 

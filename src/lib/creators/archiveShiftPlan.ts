@@ -22,8 +22,8 @@
  *   for *every* occurrence, past ones included, so it cannot be patched. It is
  *   **split**, the way "edit this and future" splits one: the old root is
  *   truncated before the first occurrence at/after the cutoff and a new root
- *   carries the series on without the account. Two things the PUT path does not
- *   do, and this must:
+ *   carries the series on without the account. As with any split
+ *   (`shifts/seriesSplitPlan.ts`):
  *   - `count` is reduced by the occurrences the old root already emitted, or a
  *     "10 occurrences" roster would run to 10 more.
  *   - Override and tombstone documents dated on/after the split are **re-pointed**
@@ -39,6 +39,7 @@
  */
 
 import { findSeriesSplit } from '../utils/recurrence';
+import { docsMovedBySplit, leavesMovedBySplit, remainingCount, type SplitLeave } from '../shifts/seriesSplitPlan';
 import type { ShiftRecurrence } from '@/types/firestore';
 
 /** A shift document with its timestamps as ms — what the planner needs and nothing else. */
@@ -63,14 +64,7 @@ export interface PlanShift {
   createdBy: string;
 }
 
-export interface PlanLeave {
-  leaveId: string;
-  status: 'pending' | 'approved' | 'denied';
-  shiftId: string;
-  occurrenceStart: number;
-  releasedShiftId: string | null;
-  releasedOccurrenceStart: number | null;
-}
+export type PlanLeave = SplitLeave;
 
 export interface AssignmentPatch {
   creatorIds: string[];
@@ -157,12 +151,11 @@ export function planArchiveShifts(params: {
     }
 
     const rule = root.recurrence!;
-    const remaining = rule.count != null ? rule.count - split.before : null;
+    const remaining = remainingCount(rule.count, split.before);
     if (remaining !== null && remaining <= 0) continue;
 
     const repoint: SeriesSplitPlan['repoint'] = [];
-    for (const o of overridesOf.get(root.shiftId) ?? []) {
-      if (o.overrideDateMs === null || o.overrideDateMs < split.overrideDateMs) continue;
+    for (const o of docsMovedBySplit(overridesOf.get(root.shiftId) ?? [], root.shiftId, split.overrideDateMs)) {
       handledBySplit.add(o.shiftId);
       // Soft-deleted docs are detached too: an edited occurrence later released
       // for leave is an override with `isDeleted: true` that still holds its
@@ -174,15 +167,7 @@ export function planArchiveShifts(params: {
       if (patch && patch.creatorIds.length === 0 && !o.isDeleted) plan.emptied.push(o.shiftId);
     }
 
-    const movedLeaves = leaves
-      .filter(l => l.status === 'approved')
-      .map(l => ({
-        leaveId: l.leaveId,
-        shiftId: l.releasedShiftId ?? l.shiftId,
-        start: l.releasedOccurrenceStart ?? l.occurrenceStart,
-      }))
-      .filter(l => l.shiftId === root.shiftId && l.start >= split.occurrenceStart)
-      .map(l => ({ leaveId: l.leaveId, releasedOccurrenceStart: l.start }));
+    const movedLeaves = leavesMovedBySplit(leaves, root.shiftId, split.occurrenceStart);
 
     const { shiftId: _rootId, ...rest } = root;
     void _rootId;

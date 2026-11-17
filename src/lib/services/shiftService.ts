@@ -1,6 +1,7 @@
 import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import type { ShiftDocument, ShiftRecurrence, TimeEntryLedgerDocument, ActiveSessionDocument } from '@/types/firestore';
+import type { SplitLeave } from '../shifts/seriesSplitPlan';
 
 const SHIFTS = 'shifts';
 const TIME_ENTRIES = 'time_entries';
@@ -274,6 +275,76 @@ export function truncateSeriesPatch(newEndDateMs: number): Record<string, unknow
     'recurrence.endDate': Timestamp.fromMillis(dayBeforeMs),
     updatedAt: FieldValue.serverTimestamp(),
   };
+}
+
+// ─── Splitting a series ──────────────────────────────────────────────
+
+const LEAVE_REQUESTS = 'leave_requests';
+
+/** One split, ready to write. Built by `seriesSplitPlan.ts` helpers — see there for why each part exists. */
+export interface SeriesSplitWrite {
+  rootId: string;
+  /** UTC midnight of the first date the new root owns. */
+  truncateAtMs: number;
+  newRoot: CreateShiftInput;
+  /** Overrides / tombstones moving to the new root, with any field changes folded in. */
+  repoint: Array<{ shiftId: string; patch?: Record<string, unknown> | null }>;
+  /** Approved leave whose released occurrence now belongs to the new root. */
+  leaves: Array<{ leaveId: string; releasedOccurrenceStart: number }>;
+}
+
+/**
+ * Write a split atomically: truncate, create, re-point, move leave. One batch,
+ * because half a split is worse than none — a new root without its re-points
+ * shows edited days twice and released days again.
+ *
+ * Refuses rather than writing in pieces when the split is larger than a batch
+ * (500 writes); no real series has hundreds of future exceptions.
+ */
+export async function commitSeriesSplit(split: SeriesSplitWrite): Promise<string> {
+  const ops = 2 + split.repoint.length + split.leaves.length;
+  if (ops > 500) throw new Error(`Series ${split.rootId} has too many future exceptions to split in one write (${ops}).`);
+
+  const batch = adminDb.batch();
+  const newRef = adminDb.collection(SHIFTS).doc();
+  batch.update(adminDb.collection(SHIFTS).doc(split.rootId), truncateSeriesPatch(split.truncateAtMs));
+  batch.set(newRef, newRootShiftDoc(newRef.id, split.newRoot));
+  for (const o of split.repoint) {
+    batch.update(adminDb.collection(SHIFTS).doc(o.shiftId), {
+      seriesId: newRef.id,
+      ...(o.patch ?? {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  for (const l of split.leaves) {
+    batch.update(adminDb.collection(LEAVE_REQUESTS).doc(l.leaveId), {
+      releasedShiftId: newRef.id,
+      releasedOccurrenceStart: l.releasedOccurrenceStart,
+    });
+  }
+  await batch.commit();
+  return newRef.id;
+}
+
+/**
+ * Leave requests whose occurrence is at or after `fromMs`, less a week of
+ * slack for one the release resolved away from its pin. Queried on
+ * `occurrenceStart` (indexed); `releasedShiftId` is matched in memory.
+ */
+export async function getLeaveForSplit(fromMs: number): Promise<SplitLeave[]> {
+  const snap = await adminDb
+    .collection(LEAVE_REQUESTS)
+    .where('occurrenceStart', '>=', fromMs - 7 * 24 * 60 * 60 * 1000)
+    .get();
+  return snap.docs.map(d => ({
+    leaveId: d.id,
+    userId: d.get('userId'),
+    status: d.get('status'),
+    shiftId: d.get('shiftId'),
+    occurrenceStart: d.get('occurrenceStart'),
+    releasedShiftId: d.get('releasedShiftId') ?? null,
+    releasedOccurrenceStart: d.get('releasedOccurrenceStart') ?? null,
+  }));
 }
 
 // ─── Reads ───────────────────────────────────────────────────────────
