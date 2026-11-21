@@ -78,6 +78,11 @@ export interface CoverageWithdrawalRow {
 interface CoverageState {
   offers: CoverageOfferRow[];
   withdrawals: CoverageWithdrawalRow[];
+  /**
+   * The earliest day on which the caller can still claim cover whose window has
+   * ended — the payroll boundary (`lateCoverFloorDay`). `null` until loaded.
+   */
+  lateClaimFrom: string | null;
   isAdmin: boolean;
   loading: boolean;
   error: string | null;
@@ -105,6 +110,7 @@ export function useCoverageOffers(
   const [state, setState] = useState<CoverageState>({
     offers: [],
     withdrawals: [],
+    lateClaimFrom: null,
     isAdmin: false,
     loading: enabled,
     error: null,
@@ -139,10 +145,12 @@ export function useCoverageOffers(
         offers: CoverageOfferRow[];
         withdrawals?: CoverageWithdrawalRow[];
         isAdmin: boolean;
+        lateClaimFrom?: string;
       };
       setState({
         offers: body.offers,
         withdrawals: body.withdrawals ?? [],
+        lateClaimFrom: body.lateClaimFrom ?? null,
         isAdmin: body.isAdmin,
         loading: false,
         error: null,

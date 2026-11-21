@@ -107,7 +107,7 @@ const SHARE_ID_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
  * It was 32 (160 bits), which made the shared link 66 characters. 80 bits is
  * the standard bar for an unauthenticated capability URL, and the extra 80 was
  * buying nothing: the token is the *only* access control on `/s/[shareId]`, and
- * with a 500-snip-per-user cap the whole corpus is on the order of 10^5 rows,
+ * with a 1000-snip-per-user cap the whole corpus is on the order of 10^5 rows,
  * so hitting **any** of them takes ~6x10^18 guesses — millions of years even at
  * a request rate that path would never survive.
  *

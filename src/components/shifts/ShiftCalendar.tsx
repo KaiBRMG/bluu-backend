@@ -235,6 +235,7 @@ export function ShiftCalendar({
   const { shifts, loading, error, refetch } = useShiftCalendar(months);
   const {
     offers,
+    lateClaimFrom,
     setClaim,
     loading: offersLoading,
     // Both hooks below build a real error message and both used to have it
@@ -677,6 +678,7 @@ export function ShiftCalendar({
                         offers={cell.offers}
                         formatTime={formatTime}
                         now={now}
+                        lateClaimFrom={lateClaimFrom}
                         onClaim={setClaim}
                       />
                     </div>
@@ -772,6 +774,7 @@ export function ShiftCalendar({
                           offers={cell.offers}
                           formatTime={formatTime}
                           now={now}
+                          lateClaimFrom={lateClaimFrom}
                           onClaim={setClaim}
                         />
                       </div>
@@ -1315,13 +1318,21 @@ function OfferCell({
   offers,
   formatTime,
   now,
+  lateClaimFrom,
   onClaim,
 }: {
   day: string;
   offers: CoverageOfferRow[];
   formatTime: (ms: number) => string;
-  /** Claims stay open until the window ends — mirrors the claim route. */
+  /** Tells an upcoming window from one that has already happened. */
   now: number;
+  /**
+   * Cover that already happened stays claimable until payroll closes on it
+   * (2026-11-17) — agents forget, and an admin can still assign it late. This is
+   * the server's boundary for this agent; on or after it an ended offer reads
+   * "Claim", before it "Closed". The claim route makes the exact check.
+   */
+  lateClaimFrom: string | null;
   onClaim: (offerId: string, claimed: boolean) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -1340,7 +1351,7 @@ function OfferCell({
         claiming ? `You're in for ${offer.creatorName} on ${formatDayLabelWithWeekday(day)}` : 'Claim withdrawn',
       );
     } catch (err) {
-      // The server's message says why — already assigned, already ended — which
+      // The server's message says why — already assigned, payroll closed — which
       // is the only useful thing to say here.
       toast.error(err instanceof Error ? err.message : 'Could not update your claim');
     } finally {
@@ -1380,54 +1391,66 @@ function OfferCell({
         </div>
 
         <ul className="max-h-72 divide-y divide-white/[0.07] overflow-y-auto">
-          {offers.map(offer => (
-            <li key={offer.offerId} className="px-3 py-2.5">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <CreatorChip creatorId={offer.creatorId} name={offer.creatorName} />
-                  <p className="mt-1 text-xs tabular-nums text-zinc-400">
-                    {formatTime(offer.windowStart)} – {formatTime(offer.windowEnd)}
-                  </p>
-                  {offer.originalUserName && (
-                    <p className="mt-0.5 text-xs text-zinc-400">Covering {offer.originalUserName}</p>
-                  )}
-                  {offer.claimCount > 0 && (
-                    <p className="mt-0.5 flex items-center gap-1 text-xs text-zinc-400">
-                      <Users className="size-3" aria-hidden />
-                      <span className="tabular-nums">{offer.claimCount}</span> in so far
+          {offers.map(offer => {
+            const ended = offer.windowEnd <= now;
+            const closed = ended && (lateClaimFrom === null || offer.day < lateClaimFrom);
+            return (
+              <li key={offer.offerId} className="px-3 py-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <CreatorChip creatorId={offer.creatorId} name={offer.creatorName} />
+                    <p className="mt-1 text-xs tabular-nums text-zinc-400">
+                      {formatTime(offer.windowStart)} – {formatTime(offer.windowEnd)}
                     </p>
-                  )}
-                </div>
+                    {/* Said in words, not only by the button: "Claim" on a day that
+                        has passed reads like a bug unless the cell says why. */}
+                    {ended && !closed && (
+                      <p className="mt-0.5 text-xs text-orange-400">
+                        {offer.myClaim ? 'Already happened · waiting for an admin' : 'Already happened · still claimable'}
+                      </p>
+                    )}
+                    {offer.originalUserName && (
+                      <p className="mt-0.5 text-xs text-zinc-400">Covering {offer.originalUserName}</p>
+                    )}
+                    {offer.claimCount > 0 && (
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-zinc-400">
+                        <Users className="size-3" aria-hidden />
+                        <span className="tabular-nums">{offer.claimCount}</span> in so far
+                      </p>
+                    )}
+                  </div>
 
-                <Button
-                  size="xs"
-                  variant={offer.myClaim ? 'outline' : 'default'}
-                  disabled={busy === offer.offerId || (!offer.myClaim && offer.windowEnd <= now)}
-                  onClick={() => void toggle(offer)}
-                  className={cn(
-                    'shrink-0',
-                    offer.myClaim && 'border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/15',
-                  )}
-                >
-                  {busy === offer.offerId && <Loader2Icon className="activity-spinner size-3" aria-hidden />}
-                  {offer.myClaim ? (
-                    <>
-                      <Check aria-hidden />
-                      In
-                    </>
-                  ) : offer.windowEnd <= now ? (
-                    'Ended'
-                  ) : (
-                    'Claim'
-                  )}
-                </Button>
-              </div>
-            </li>
-          ))}
+                  <Button
+                    size="xs"
+                    variant={offer.myClaim ? 'outline' : 'default'}
+                    disabled={busy === offer.offerId || (!offer.myClaim && closed)}
+                    onClick={() => void toggle(offer)}
+                    className={cn(
+                      'shrink-0',
+                      offer.myClaim && 'border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/15',
+                    )}
+                  >
+                    {busy === offer.offerId && <Loader2Icon className="activity-spinner size-3" aria-hidden />}
+                    {offer.myClaim ? (
+                      <>
+                        <Check aria-hidden />
+                        In
+                      </>
+                    ) : closed ? (
+                      'Closed'
+                    ) : (
+                      'Claim'
+                    )}
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
 
         <p className="border-t border-white/[0.07] px-3 py-2 text-xs leading-relaxed text-zinc-400">
-          Claiming puts your name forward. An admin confirms who covers what.
+          Claiming puts your name forward. An admin confirms who covers what — even after the day, until that
+          month&apos;s payroll is finalised.
         </p>
       </PopoverContent>
     </Popover>

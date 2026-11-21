@@ -8,9 +8,15 @@
  *
  * ## What a claim checks
  *
- * The offer is still open, it is not the claimant's own released shift, and its
- * window has not **ended** — it is claimable while under way, because cover that
- * starts late is still cover. There is **no cap on accounts** (removed
+ * The offer is still open and it is not the claimant's own released shift.
+ *
+ * **An ended window is still claimable (2026-11-17)** — agents forget to claim,
+ * and cover that already happened still deserves crediting. What bounds it is
+ * payroll, not the clock: once the offer's month is finalised for the claimant,
+ * or the sales sync has moved past it, the claim is refused
+ * (`lateCoverRefusal`). Upcoming and in-progress windows never pay that check.
+ *
+ * There is **no cap on accounts** (removed
  * 2026-10-20): an agent may put their name down for as much overtime as they
  * like, and the admin who assigns sees each claimant's load on Coverage → To
  * assign. Enforced here rather than only in the UI: a client-side guard is not a
@@ -28,7 +34,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
-import { claimOffer, withdrawClaim, getOffer } from '@/lib/services/caCoverageService';
+import { claimOffer, withdrawClaim, getOffer, lateCoverRefusal } from '@/lib/services/caCoverageService';
 import { dequeueClaimNotice, queueClaimNotice } from '@/lib/services/coverageNotices';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 
@@ -48,7 +54,8 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       return NextResponse.json({ error: 'You cannot cover your own released shift.' }, { status: 400 });
     }
     if (offer.windowEnd <= Date.now()) {
-      return NextResponse.json({ error: 'This shift has already ended.' }, { status: 400 });
+      const refusal = await lateCoverRefusal(offer.day, token.uid);
+      if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
     }
 
     await claimOffer(offerId, token.uid, typeof note === 'string' ? note.trim().slice(0, 280) : undefined);

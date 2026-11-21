@@ -25,7 +25,7 @@ function parseBound(raw: string | null): number | null | 'invalid' {
  * filter that silently falls away would present the whole library as though it
  * were the filtered result. Served by the existing composite index.
  *
- * **Paged, not whole** (rule 9i). The full library is up to five hundred rows,
+ * **Paged, not whole** (rule 9i). The full library is up to a thousand rows,
  * and each row's preview is a further origin request, so shipping the lot to
  * render two screens of grid is the expensive shape. `total` comes back on the
  * first page only — the count the grid needs once, not on every scroll.

@@ -28,7 +28,7 @@ import {
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { LeaveHistory } from './LeaveHistory';
 import { getAvatarColor, getInitials } from '@/lib/utils/avatar';
-import { formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
+import { addMonths, currentMonthKey, formatDayLabelWithWeekday } from '@/lib/salary/salaryDate';
 import { formatRelative, formatShiftWindow, pluralise } from '@/lib/salary/salaryFormat';
 
 /**
@@ -67,7 +67,11 @@ import { formatRelative, formatShiftWindow, pluralise } from '@/lib/salary/salar
  */
 
 export default function AdminCoverage() {
-  const { offers, withdrawals, loading, error, refetch } = useCoverageOffers({ claimantDetail: true });
+  // From the first of last month, not the hook's "yesterday": cover that already
+  // happened can still be assigned until payroll closes on it, and payroll never
+  // stays open more than one month back. Captured once so the range is stable.
+  const [from] = useState(() => `${addMonths(currentMonthKey(), -1)}-01`);
+  const { offers, withdrawals, loading, error, refetch } = useCoverageOffers({ claimantDetail: true, from });
   const { rows: pendingLeave, loading: leaveLoading, decide } = useAdminLeaveQueue('pending');
 
   // Captured once per mount, like the leave queue's clock — the board refetches
@@ -75,10 +79,20 @@ export default function AdminCoverage() {
   // lingers until the tab is reopened.
   const [now] = useState(() => Date.now());
 
-  // An unassigned offer whose window has already ended is no longer a decision:
-  // nobody can cover it now. Hidden rather than deleted — the offer document is
-  // untouched, and the tab badge counts only what can still be acted on.
-  const available = offers.filter(o => o.status === 'available' && o.windowEnd > now);
+  // Upcoming cover first. An offer whose window has already ended is still a
+  // decision (2026-11-17): agents forget to claim and admins forget to assign,
+  // and assigning late still pays — the sales follow on the next sync and the
+  // hours are whatever was tracked. It sits in its own group below, claimed
+  // first, because it is less urgent than tomorrow's gap. The server refuses
+  // once payroll has closed on the month.
+  const upcoming = offers.filter(o => o.status === 'available' && o.windowEnd > now);
+  const late = offers
+    .filter(o => o.status === 'available' && o.windowEnd <= now)
+    .sort((a, b) => Number(b.claimCount > 0) - Number(a.claimCount > 0) || b.windowStart - a.windowStart);
+  // The badge counts decisions someone is waiting on: every upcoming gap, but
+  // only the past ones somebody has claimed — an unclaimed past offer would
+  // otherwise pin the badge for the rest of the month.
+  const toAssignCount = upcoming.length + late.filter(o => o.claimCount > 0).length;
   const assigned = offers.filter(o => o.status === 'assigned');
 
   return (
@@ -105,9 +119,9 @@ export default function AdminCoverage() {
           </TabsTrigger>
           <TabsTrigger value="assign">
             To assign
-            {available.length > 0 && (
+            {toAssignCount > 0 && (
               <span className="ml-1.5 rounded-full bg-[#3b82f6]/15 px-1.5 text-[11px] font-semibold tabular-nums text-[#3b82f6]">
-                {available.length}
+                {toAssignCount}
               </span>
             )}
           </TabsTrigger>
@@ -122,17 +136,34 @@ export default function AdminCoverage() {
         <TabsContent value="assign" className="mt-4">
           {loading && <Skeleton className="h-48 w-full rounded-lg" />}
           {error && !loading && <p className="text-sm text-red-400">{error}</p>}
-          {!loading && !error && available.length === 0 && (
+          {!loading && !error && upcoming.length === 0 && late.length === 0 && (
             <p className="text-sm text-zinc-400">
               Nothing waiting to be covered. Accounts appear here when leave is approved.
             </p>
           )}
-          {!loading && !error && available.length > 0 && (
+          {!loading && !error && upcoming.length > 0 && (
             <ul className="divide-y divide-white/[0.07] rounded-lg border border-white/[0.07]">
-              {available.map(offer => (
+              {upcoming.map(offer => (
                 <OfferRow key={offer.offerId} offer={offer} onChanged={refetch} />
               ))}
             </ul>
+          )}
+          {!loading && !error && late.length > 0 && (
+            <section className={cn(upcoming.length > 0 && 'mt-6')} aria-labelledby="coverage-late-heading">
+              <h3 id="coverage-late-heading" className="text-sm font-semibold">
+                Already happened
+              </h3>
+              <p className="mt-0.5 mb-2.5 max-w-[70ch] text-xs leading-relaxed text-zinc-400">
+                Ended with nobody assigned. Assigning now still credits the agent: the sales move to them on the next
+                sync, and the hours count if they were clocked in. Withdraw anything nobody actually covered. Closes
+                once that month&apos;s payroll is finalised.
+              </p>
+              <ul className="divide-y divide-white/[0.07] rounded-lg border border-white/[0.07]">
+                {late.map(offer => (
+                  <OfferRow key={offer.offerId} offer={offer} onChanged={refetch} />
+                ))}
+              </ul>
+            </section>
           )}
         </TabsContent>
 
@@ -369,9 +400,13 @@ function OfferRow({ offer, onChanged }: { offer: CoverageOfferRow; onChanged: ()
         return;
       }
 
-      const body = (await res.json()) as { inShift: boolean; merged: boolean };
+      const body = (await res.json()) as { inShift: boolean; merged: boolean; lateCover?: boolean };
       toast.success(
-        body.inShift
+        body.lateCover
+          ? body.inShift
+            ? 'Assigned after the fact — the sales move to them on the next sync'
+            : 'Overtime credited after the fact — sales on the next sync, hours from what they tracked'
+          : body.inShift
           ? 'Assigned inside their existing shift — sales only, hours unchanged'
           : body.merged
             ? 'Added to their overtime shift — the hourly rate now reflects the extra account'
@@ -396,7 +431,16 @@ function OfferRow({ offer, onChanged }: { offer: CoverageOfferRow; onChanged: ()
         { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } },
       );
       if (!res.ok) {
-        toast.error('Could not update this offer');
+        // The server says why when it refuses — e.g. payroll has closed on the
+        // month, now that last month's assignments are on this screen.
+        let message = 'Could not update this offer';
+        try {
+          const body = await res.json();
+          if (body?.error) message = body.error;
+        } catch {
+          /* keep the generic message */
+        }
+        toast.error(message);
         return;
       }
       toast.success(cancel ? 'Withdrawn from the board' : 'Put back on the board');

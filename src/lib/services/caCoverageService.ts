@@ -32,7 +32,17 @@
 
 import { adminDb } from '../firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { toDayKey, dayKeyRange, type SalaryDayKey } from '../salary/salaryDate';
+import {
+  toDayKey,
+  dayKeyRange,
+  addMonths,
+  currentMonthKey,
+  formatMonthLabel,
+  monthOfDay,
+  type SalaryDayKey,
+} from '../salary/salaryDate';
+import { isSalaryMonthVisible } from '../salary/salaryConstants';
+import { getFinalizedMonthsFor, resolvePayrollMonth } from './caSalaryService';
 import { splitShiftAccounts } from '../salary/shiftAccounts';
 import type { CaCoverageOfferDocument, ShiftDocument } from '@/types/firestore';
 import { safeTimezone, toLocalDateStr } from '../utils/timezone';
@@ -229,6 +239,67 @@ export async function withdrawClaim(offerId: string, userId: string): Promise<vo
     [`claims.${userId}`]: FieldValue.delete(),
     updatedAt: FieldValue.serverTimestamp(),
   });
+}
+
+// ─── Cover after the fact ────────────────────────────────────────────
+
+/**
+ * Cover that already happened can still be claimed and assigned (2026-11-17).
+ *
+ * Agents forget to claim and admins forget to assign, and until now an offer
+ * whose window had ended was simply lost: the sales sat unassigned (the absent
+ * agent's occurrence is tombstoned, so nobody was on shift) and the hours were
+ * never paid. Assigning late is safe because everything downstream is derived:
+ *
+ * - **Sales** move on the next OnlyMonster sync (or a Sales-page refresh) —
+ *   the derive stage re-attributes the whole open payroll window every run.
+ * - **Hours** are read from the time ledger against the shift's window, so a
+ *   late overtime shift pays only what was actually tracked inside it.
+ *
+ * The boundary is payroll: once the month is finalised for the agent, a shift
+ * added to it would make the live grid disagree with what was paid, and once
+ * the sync's window has moved past it, its sales would never follow.
+ */
+
+/**
+ * The earliest day an *ended* offer is still creditable to this agent — the
+ * cheap version the board renders from (one snapshot read). The claim and
+ * assign routes make the exact check with `lateCoverRefusal`.
+ */
+export async function lateCoverFloorDay(userId: string, now: number = Date.now()): Promise<SalaryDayKey> {
+  const current = currentMonthKey(now);
+  const previous = addMonths(current, -1);
+  if (!isSalaryMonthVisible(previous)) return `${current}-01`;
+  const finalized = await getFinalizedMonthsFor([userId], previous);
+  return finalized.has(userId) ? `${current}-01` : `${previous}-01`;
+}
+
+/**
+ * Why cover on `day` can no longer be credited to `userId`, or `null` if it
+ * can. Only meaningful for a window that has ended — upcoming cover is never
+ * refused on payroll grounds. `subject` words the message for whoever reads it.
+ *
+ * Cost: one snapshot read; plus `resolvePayrollMonth` only for last month,
+ * which is the only case where the sync's window may already have moved on.
+ */
+export async function lateCoverRefusal(
+  day: SalaryDayKey,
+  userId: string,
+  subject: { possessive: string } = { possessive: 'Your' },
+  now: number = Date.now(),
+): Promise<string | null> {
+  const month = monthOfDay(day);
+  const current = currentMonthKey(now);
+  const closed = `Payroll for ${formatMonthLabel(month)} has closed, so this can no longer be credited.`;
+
+  if (month < addMonths(current, -1)) return closed;
+  if (month < current && month < (await resolvePayrollMonth(now))) return closed;
+
+  const finalized = await getFinalizedMonthsFor([userId], month);
+  if (finalized.has(userId)) {
+    return `${subject.possessive} salary for ${formatMonthLabel(month)} is already finalised, so this can no longer be credited.`;
+  }
+  return null;
 }
 
 // ─── Assignment ──────────────────────────────────────────────────────

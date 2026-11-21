@@ -69,7 +69,7 @@ const POSTER_WRITE_TTL_MS = 6 * 60 * 60 * 1000;
  * grid pages through it `SNIP_PAGE_SIZE` at a time, so this is a storage cap
  * rather than a rendering one.
  */
-const MAX_SNIPS_PER_USER = 500;
+const MAX_SNIPS_PER_USER = 1000;
 
 // ─── Authorisation ───────────────────────────────────────────────────
 
@@ -604,7 +604,7 @@ export async function finalizeSnip(
  *
  * Small on purpose. Every row carries an image the browser will ask for, and
  * each of those is a redirect through a Vercel function — so an unpaged list is
- * not one expensive response, it is one response plus up to five hundred origin
+ * not one expensive response, it is one response plus up to a thousand origin
  * requests (rule 9i). A page is what the grid can show before the user has
  * scrolled anywhere.
  */

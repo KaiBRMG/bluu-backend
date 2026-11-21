@@ -10,6 +10,13 @@
  * hours", and it is derivable. `forceInShift` exists for the case the calendar
  * cannot see, such as an agent agreeing to stay on past their shift end.
  *
+ * **A window that has already ended can still be assigned (2026-11-17)** — the
+ * "I forgot to assign it" case. The shift is written exactly as it would have
+ * been on time; its sales follow on the next sync and its hours are whatever the
+ * agent tracked inside it. Refused once the month is finalised for the assignee
+ * or the sync has moved past it (`lateCoverRefusal`), because past that point a
+ * new shift changes what the grid says without changing what was paid.
+ *
  * **The assignee is notified, but not from here.** An absence releases every
  * account the agent was covering and an admin assigns them one at a time, so
  * sending on each POST would message the same person four times in a minute.
@@ -22,7 +29,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError } from '@/lib/middleware/apiHelpers';
 import { requireCaAdmin } from '@/lib/salary/salaryAuth';
-import { assignOffer, getOffer, unassignOffer, cancelOffer } from '@/lib/services/caCoverageService';
+import {
+  assignOffer,
+  getOffer,
+  unassignOffer,
+  cancelOffer,
+  lateCoverRefusal,
+} from '@/lib/services/caCoverageService';
 import { getUserById } from '@/lib/services/userService';
 import { queueCoverageNotice } from '@/lib/services/coverageNotices';
 import { toDayKey } from '@/lib/salary/salaryDate';
@@ -76,6 +89,17 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       }
     }
 
+    // Cover after the fact: bounded by payroll, not by the clock.
+    const effectiveStart = body.windowStart ?? offer.windowStart;
+    const effectiveEnd = body.windowEnd ?? offer.windowEnd;
+    const lateCover = effectiveEnd <= Date.now();
+    if (lateCover) {
+      const refusal = await lateCoverRefusal(toDayKey(effectiveStart), body.userId, {
+        possessive: assignee.displayName ? `${assignee.displayName}'s` : 'Their',
+      });
+      if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
+    }
+
     const result = await assignOffer({
       offerId: body.offerId,
       userId: body.userId,
@@ -92,7 +116,7 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
     await queueCoverageNotice({
       kind: 'assigned',
       userId: body.userId,
-      day: toDayKey(body.windowStart ?? offer.windowStart),
+      day: toDayKey(effectiveStart),
       creatorNames: [offer.creatorName],
     });
 
@@ -101,6 +125,9 @@ export const POST = withAuth(async (request: NextRequest, token: DecodedIdToken)
       shiftId: result.shiftId,
       inShift: result.inShift,
       merged: result.merged,
+      // The UI words its confirmation differently for cover that already
+      // happened: the sales arrive on the next sync, not now.
+      lateCover,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : '';
@@ -119,6 +146,16 @@ export const DELETE = withAuth(async (request: NextRequest, token: DecodedIdToke
     const { searchParams } = new URL(request.url);
     const offerId = searchParams.get('offerId');
     if (!offerId) return NextResponse.json({ error: 'offerId is required' }, { status: 400 });
+
+    // Late out is bounded like late in: undoing an assignment whose window has
+    // ended deletes or edits a shift in that month, so it is refused once payroll
+    // has closed on it for the assignee. Cancelling an unassigned offer touches
+    // no shift and needs no check.
+    const offer = await getOffer(offerId);
+    if (offer?.status === 'assigned' && offer.assignedTo && offer.windowEnd <= Date.now()) {
+      const refusal = await lateCoverRefusal(offer.day, offer.assignedTo, { possessive: 'Their' });
+      if (refusal) return NextResponse.json({ error: refusal.replace('credited', 'changed') }, { status: 400 });
+    }
 
     // `cancel` withdraws the account from the board entirely; the default puts
     // it back up for someone else. Both delete the shift the assignment created,
