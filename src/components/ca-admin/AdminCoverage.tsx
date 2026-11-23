@@ -83,8 +83,8 @@ export default function AdminCoverage() {
   // decision (2026-11-17): agents forget to claim and admins forget to assign,
   // and assigning late still pays — the sales follow on the next sync and the
   // hours are whatever was tracked. It sits in its own group below, claimed
-  // first, because it is less urgent than tomorrow's gap. The server refuses
-  // once payroll has closed on the month.
+  // first, because it is less urgent than tomorrow's gap. Offers from a month
+  // payroll has closed on never arrive — the offers route excludes them.
   const upcoming = offers.filter(o => o.status === 'available' && o.windowEnd > now);
   const late = offers
     .filter(o => o.status === 'available' && o.windowEnd <= now)
@@ -155,8 +155,8 @@ export default function AdminCoverage() {
               </h3>
               <p className="mt-0.5 mb-2.5 max-w-[70ch] text-xs leading-relaxed text-zinc-400">
                 Ended with nobody assigned. Assigning now still credits the agent: the sales move to them on the next
-                sync, and the hours count if they were clocked in. Withdraw anything nobody actually covered. Closes
-                once that month&apos;s payroll is finalised.
+                sync, and the hours count if they were clocked in. Withdraw anything nobody actually covered. Offers
+                drop off this list once their month&apos;s payroll is finalised.
               </p>
               <ul className="divide-y divide-white/[0.07] rounded-lg border border-white/[0.07]">
                 {late.map(offer => (

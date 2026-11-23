@@ -50,7 +50,7 @@ export function todaySessionCloseMs(session: TodaySession, now: number): number 
 /**
  * Worked seconds for one session — `working + break`, idle and pause excluded.
  *
- * Both today's consumers (`useDayTotal` and `TodayTimeline`) MUST derive their
+ * Both today's consumers (`useDayTotal` and `useTodayModel`) MUST derive their
  * totals from this function so the timer page's "TODAY" and the timesheet's
  * "Total worked" cannot drift apart (time-tracking.md §2, total-worked invariant).
  *

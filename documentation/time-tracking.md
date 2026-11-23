@@ -21,11 +21,17 @@
 | `src/hooks/useTimeTracking.ts` | Hook surface over the context |
 | `src/hooks/useTodaySessions.ts` | **Today's sessions from BOTH sources** — local buffers + committed ledger |
 | `src/hooks/useDayTotal.ts` | The "TODAY" total |
-| `src/components/timesheet/TodayTimeline.tsx` | Timeline bars + per-row totals |
+| `src/components/time-tracking/TimeInstrument.tsx` | The page's hero: state, clock, the shift ring, actions, shift / break / today's make-up (§8) |
+| `src/components/time-tracking/ShiftRing.tsx` | The ring: today's span as a 280° arc, segments per state, dashed shift, now tick (§8) |
+| `src/components/time-tracking/TodaySessions.tsx` | *Today's sessions* tab: one row per session on the ring's scale |
+| `src/components/time-tracking/useTodayModel.ts` | Today at minute resolution: sessions → segments, totals, today's shift, the ring's span |
+| `src/lib/timesheet/daySegments.ts` | Pure session → segment builder (incl. *not counted*), totals, durations |
+| `src/lib/shiftSpans.ts` | `mergeShiftSpans` (shared with the break policy) + `pickTodayShift` |
+| `src/hooks/useMyShift.ts` | The caller's own shift spans, from `GET /api/time-tracking/my-shift` |
 | `src/components/timesheet/DayTimeline.tsx` | One day's segment bar + tooltip; opens the walkthrough |
 | `src/components/timesheet/SessionWalkthroughDialog.tsx` | Per-session event-log walkthrough (§6) |
 | `src/hooks/useTimesheetData.ts` | Timesheet cache (5 min TTL) |
-| API: `src/app/api/time-tracking/*/route.ts` | `start`, `stop`, `clock-out`, `discard`, `heartbeat`, `transition`, `status`, `upload-log`, `entries`, `break-policy`, `screenshots/*` |
+| API: `src/app/api/time-tracking/*/route.ts` | `start`, `stop`, `clock-out`, `discard`, `heartbeat`, `transition`, `status`, `upload-log`, `entries`, `break-policy`, `my-shift`, `screenshots/*` |
 | `src/lib/shiftBreakPolicy.ts` | Shift-edge break restriction: policy type, blocked-window maths, user-facing copy (§3g) |
 | `electron/main.js`, `electron/preload.js` | `timeTracking:getActivitySince` IPC (powerMonitor) |
 | `src/types/electron.d.ts` | `electronAPI.timeTracking.getActivitySince` type |
@@ -70,18 +76,18 @@ Client appends events ──► local buffer (localBuffer.ts)
 
 **Why:** Without this, a clock-out-less buffer's open working segment is counted all the way to `now`, inflating totals and rendering as a phantom "live, working" session while the user is clocked out.
 
-**Consumers:** both today-views, via `todaySessionCloseMs` in `useTodaySessions.ts` (see §2b) — `TodayTimeline.tsx` (timeline bars + per-row totals) and `useDayTotal.ts` (the "TODAY" total).
+**Consumers:** both today-views, via `todaySessionCloseMs` in `useTodaySessions.ts` (see §2b) — `useTodayModel.ts` (the ring, the make-up list and *Today's sessions*) and `useDayTotal.ts` (the "TODAY" total).
 
 **ANTI-PATTERN:** Do **not** call `parseBuffer(buf.events, Date.now())` directly over a set of buffers.
 
 ### Total-worked invariant
-`useDayTotal` and `TodayTimeline`'s *Total worked* **MUST stay in sync**: both sum `workingSeconds + breakSeconds` (**idle and pause excluded**). The "TODAY" figure on the timer page is **required to equal** the timesheet's *Total worked* exactly. They now share `todaySessionWorkedSeconds`, so the invariant holds by construction rather than by two matching copies of the arithmetic.
+`useDayTotal` and every per-session figure on *Today's sessions* **MUST stay in sync**: both sum `workingSeconds + breakSeconds` (**idle and pause excluded**). The "Today" figure under the clock is **required to equal** the sum of the session rows exactly. They now share `todaySessionWorkedSeconds`, so the invariant holds by construction rather than by two matching copies of the arithmetic.
 
 ---
 
 ## 2b. Today's Views Are Multi-Device — `useTodaySessions`
 
-> `src/hooks/useTodaySessions.ts`. The **only** source `useDayTotal` and `TodayTimeline` may read.
+> `src/hooks/useTodaySessions.ts`. The **only** source `useDayTotal` and `useTodayModel` may read.
 
 The local IndexedDB buffer holds sessions tracked on **this device only**. A user who clocks out on device A and later clocks in on device B has both sessions on the server — `time_entries` is keyed by uid — but only the second one locally. A local-only read therefore showed device B a day missing all of device A's hours ("TODAY" at `00:00:00`, *"No active session today"*), while the admin timesheet and analytics showed both. `UserTimesheet` deliberately excludes today, so nothing else covered the gap.
 
@@ -94,11 +100,11 @@ The local IndexedDB buffer holds sessions tracked on **this device only**. A use
 | Ledger doc with an **empty** log | **local buffer** | A placeholder awaiting exactly this buffer's upload (§3b) — the ledger's zeroes are not yet the truth |
 | Buffer with no ledger doc | local buffer | Not yet uploaded (crash pending reconciliation) |
 
-- The ledger half comes from `useTimesheetData(null, today, today, tz)`, so it shares the 5-min sessionStorage cache, the `invalidateTimesheetCache` calls already made on clock-in/out, and an **in-flight dedupe** added to that hook — the timer page mounts the hook twice (`useDayTotal` + `TodayTimeline`) and must still cost **one** query (rule 9).
+- The ledger half comes from `useTimesheetData(null, today, today, tz)`, so it shares the 5-min sessionStorage cache, the `invalidateTimesheetCache` calls already made on clock-in/out, and an **in-flight dedupe** added to that hook — the timer page mounts the hook twice (`useDayTotal` + `useTodayModel`) and must still cost **one** query (rule 9).
 - **RULE — derive every today total from `todaySessionWorkedSeconds`.** It closes open segments with `todaySessionCloseMs` (which delegates to `sessionCloseMs`, adding only the empty-log case where the ledger's `endTime` is the sole boundary) and falls back to stored aggregates when `events` is empty.
 - **An empty event log is *unknown*, never "worked the whole span"** (analytics trap 1). A manual entry contributes its stored hours and draws one synthesised working bar (trap 7); an interrupted session the CF closed with zeroes contributes 0 and draws an empty track. Never measure `endTime − startTime` to fill the hole.
-- `TodayTimeline` must not render *"No active session today"* while the ledger is still loading, or a session from another device flashes as absent before arriving.
-- **The timer page remounts its body when it goes stale** (`useStaleRefreshKey` in `applications/time-tracking/page.tsx`). Every "today" on the page — this hook's `today`, `TodayTimeline`, `UserTimesheet`'s range, `UserScreenshots`' date — is memoised at mount, and the renderer is never reloaded (rule 9c), so a page left open overnight showed yesterday's timesheet beside a live Clock In button. Triggers: the local day rolling over (a 60s clock check, no network) or the page regaining focus/visibility after 30 min. **Only while clocked out** — a live session belongs to the day it started, so a mid-shift remount buys nothing. 30 min is past the 5-min timesheet cache TTL, so each remount refetches once.
+- *Today's sessions* (and the hero's *Nothing tracked yet today*) must not render while the ledger is still loading, or a session from another device flashes as absent before arriving.
+- **The timer page remounts its body when it goes stale** (`useStaleRefreshKey` in `applications/time-tracking/page.tsx`). Every "today" on the page — this hook's `today`, `useTodayModel` (and `useMyShift`'s fetch), `UserTimesheet`'s range, `UserScreenshots`' date — is memoised at mount, and the renderer is never reloaded (rule 9c), so a page left open overnight showed yesterday's timesheet beside a live Clock In button. Triggers: the local day rolling over (a 60s clock check, no network) or the page regaining focus/visibility after 30 min. **Only while clocked out** — a live session belongs to the day it started, so a mid-shift remount buys nothing. 30 min is past the 5-min timesheet cache TTL, so each remount refetches once.
 
 ---
 
@@ -546,6 +552,21 @@ The mapping mirrors the tick branch for branch, which is the whole point:
 - The break countdown recomputes `allowanceAtStart` from the same two refs the tick's break branch reads, in the same commit, so the two agree by construction rather than by two matching copies of the arithmetic (the same discipline as the total-worked invariant in §2).
 - It is torn down on provider unmount as well as on clock-out — a widget outliving its provider would tick on against a session nobody holds.
 
+---
+
+## 8. The Time Tracking Page — the shift ring
+
+`/applications/time-tracking` was redesigned on 2026-11-23 (direction recorded in `.impeccable/surfaces/src-app-main-applications-time-tracking.md`). Visual rules live in DESIGN.md; the behavioural ones are here.
+
+- **The hero is one object.** The live clock sits inside [`ShiftRing`](../src/components/time-tracking/ShiftRing.tsx): a 280° arc (gap at the bottom, labelled with the span's start and end) covering *today's span*, each tracked span in its `STATE_CONFIG` hue, the scheduled shift as a dashed arc outside it, and a `white/60` tick at now. Beside it: the actions, the shift line, Break Remaining and today's make-up.
+- **The span.** With a shift: from the earlier of shift start / first tracked moment to the later of shift end / last tracked moment / now (when live), so an early start or overtime reads as outside the dashed shift. Without a shift: from the first clock-in (floored to the hour) for 8h, growing to the last tracked hour. Empty day, no shift: an empty track and no labels.
+- **"Not counted" is its own kind.** A `pause` whose `meta.trigger` is `no-evidence` (§3h) or `sleep-gap` is drawn as the grey hatch Shift Management uses for unknown time, labelled *Not counted* — not *Paused*, which the person chose. [`daySegments.ts`](../src/lib/timesheet/daySegments.ts) is the one classifier.
+- **Minute resolution.** `useTodayModel` recomputes on a minute-aligned tick and on any change to today's sessions; a transition shows at once because the live session's close is never earlier than its newest event. The ring is `memo`ised and its `aria-label` sentence is memoised on minute inputs, so the clock's 1 Hz tick re-renders only the hero text, never the SVG (cf. the hub's app-shell known issue 2).
+- **Today's shift** comes from **`GET /api/time-tracking/my-shift`**: the caller's own spans ±1 day, uid from the token only (no `userId` parameter), merged by `mergeShiftSpans` (the break policy's merge, now shared), `private, max-age=300` + `Vary: Authorization`. Runs whether or not the break policy is on. `pickTodayShift` chooses the running span, else the next one today, else the last one that touched today. Fetched once per mount, keyed on the uid; the page's stale-refresh remount is what refreshes it.
+- **Breaks blocked at a shift edge** are stated on the shift line (*Breaks open at 10:00* / *No breaks in the last hour*) from the context's `breakBlock`, in addition to the disabled Break button's tooltip.
+- **Hover a segment** and the line under the clock becomes that span's state, times and duration. Pointer only; the ring is one `role="img"` with a sentence, and *Today's sessions* carries the same facts as text for keyboard and screen-reader users.
+- **Tabs:** *Today's sessions* (one row per session, its track on the ring's scale), *History* (`UserTimesheet`, seven days up to a picked date), *Screenshots* (`UserScreenshots`). No integrity or activity scoring is shown to the employee (rule 9k).
+
 ## Gotchas Checklist
 
 - [ ] Never `parseBuffer(events, Date.now())` over a buffer set — always close with `sessionCloseMs` first.
@@ -553,7 +574,7 @@ The mapping mirrors the tick branch for branch, which is the whole point:
 - [ ] Never remove an `active_sessions` doc without reserving the session in `time_entries` — its event log may still be sitting on another device (§3b).
 - [ ] Never trust a client-supplied `sessionId` into `updateSessionLog` — check owner **and** status first.
 - [ ] Any new path that signs a user out mid-session must `await clockOutAndFlush()` first — a sign-out never reaches the Clock Out button. Current paths: `AuthWrapper` (displaced), `sidebar/NavUser.tsx` (manual).
-- [ ] Keep `useDayTotal` and `TodayTimeline` *Total worked* summing `workingSeconds + breakSeconds` only.
+- [ ] Keep `useDayTotal` and *Today's sessions* summing `workingSeconds + breakSeconds` only (via `todaySessionWorkedSeconds`).
 - [ ] After clock-in/out, call `invalidateTimesheetCache(uid)`.
 - [ ] A "second active session" is a client buffer bug — check hydration/`isHydrating`, not the server.
 - [ ] Timer widget: push an **anchor**, never an elapsed number, and keep the push inside `TimeTrackingProvider` (§7). Never add `elapsedSeconds` to its deps.

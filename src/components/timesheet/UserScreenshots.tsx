@@ -5,8 +5,11 @@ import { useAuth } from '@/components/AuthProvider';
 import { useUserData } from '@/hooks/useUserData';
 import { useAdminScreenshots, ScreenshotGroup } from '@/hooks/useAdminScreenshots';
 import { Loader } from '@/components/ui/loader';
+import { Skeleton } from '@/components/ui/skeleton';
+import { SURFACE } from '@/lib/surfaces';
+import { cn } from '@/lib/utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ChevronDownIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronLeft, ChevronRight, Info, X } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -93,29 +96,20 @@ export default function UserScreenshots() {
   }, [currentModalScreen?.url]);
 
   return (
-    <div>
-      {/* Info notice */}
-      <div className="flex items-center gap-1.5 mb-4">
-        <span
-          className="flex items-center justify-center rounded-full text-[9px] font-bold leading-none flex-shrink-0"
-          style={{ width: '0.9rem', height: '0.9rem', border: '1px solid var(--foreground-muted)', color: 'var(--foreground-muted)' }}
-        >
-          i
-        </span>
-        <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
+    <div className={cn('rounded-xl p-6', SURFACE)}>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="flex items-center gap-1.5 text-sm text-zinc-400">
+          <Info aria-hidden="true" className="size-3.5 shrink-0" />
           You must contact management if you wish to delete one or more screenshots
-        </span>
-      </div>
-
+        </p>
       {/* Date picker */}
-      <div className="flex flex-wrap items-end gap-4 mb-6">
         <div>
-          <label className="form-label block mb-1">Date</label>
           <Popover open={dateOpen} onOpenChange={setDateOpen}>
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="form-input flex items-center justify-between gap-2"
+                aria-label={`Screenshots for ${selectedDate}`}
+                className="form-input flex items-center justify-between gap-2 tabular-nums"
                 style={{ cursor: 'pointer' }}
               >
                 {selectedDate}
@@ -145,41 +139,46 @@ export default function UserScreenshots() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i}>
+              <Skeleton className="aspect-video w-full rounded-md" />
+              <Skeleton className="mx-auto mt-1.5 h-3 w-20" />
+            </div>
+          ))}
         </div>
       ) : groups.length === 0 ? (
-        <div className="flex items-center justify-center py-16">
-          <span className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
-            No screenshots found for this date.
-          </span>
-        </div>
+        <p className="py-2 text-sm text-zinc-400">No screenshots for this date.</p>
       ) : (
-        <div className="grid grid-cols-4 gap-4">
+        <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {groups.map((group, groupIndex) => {
             const firstScreen = group.screens[0];
             if (!firstScreen) return null;
+            const time = formatTime(group.timestampUTC, viewerTimezone);
+            const count = `${group.screenCount} screen${group.screenCount !== 1 ? 's' : ''}`;
 
             return (
-              <div key={group.captureGroup} className="relative">
-                <img
-                  src={firstScreen.thumbnailUrl || firstScreen.url}
-                  alt={`Screenshot at ${firstScreen.timestampUTC}`}
-                  loading="lazy"
-                  className="w-full rounded cursor-pointer transition-opacity hover:opacity-80"
-                  style={{ border: '1px solid var(--border-subtle)', aspectRatio: '16/9', objectFit: 'cover' }}
+              <li key={group.captureGroup}>
+                <button
+                  type="button"
                   onClick={() => setModalPos([groupIndex, 0])}
-                />
-                <p
-                  className="text-xs mt-1 text-center"
-                  style={{ color: 'var(--foreground-muted)' }}
+                  aria-label={`Open screenshot from ${time}, ${count}`}
+                  className="group block w-full rounded-md focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
-                  {formatTime(group.timestampUTC, viewerTimezone)} &bull; {group.screenCount} screen{group.screenCount !== 1 ? 's' : ''}
-                </p>
-              </div>
+                  <img
+                    src={firstScreen.thumbnailUrl || firstScreen.url}
+                    alt=""
+                    loading="lazy"
+                    className="aspect-video w-full rounded-md border border-white/[0.07] object-cover transition-opacity duration-[120ms] group-hover:opacity-80"
+                  />
+                  <span className="mt-1.5 block text-center text-xs text-zinc-400 tabular-nums">
+                    {time} · {count}
+                  </span>
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
 
       {/* Full-screen modal */}
@@ -194,9 +193,10 @@ export default function UserScreenshots() {
             onClick={() => setModalPos(null)}
             variant="ghost"
             size="icon"
-            className="absolute top-4 right-4 text-white text-3xl leading-none hover:opacity-70 hover:bg-transparent"
+            aria-label="Close"
+            className="absolute top-4 right-4 text-white hover:opacity-70 hover:bg-transparent"
           >
-            &times;
+            <X aria-hidden="true" className="size-6" />
           </Button>
 
           {/* Left arrow */}
@@ -208,9 +208,11 @@ export default function UserScreenshots() {
                 setModalPos([prev.groupIndex, prev.screenIndex]);
               }}
               variant="ghost"
-              className="absolute left-4 text-white text-5xl leading-none hover:opacity-70 hover:bg-transparent"
+              size="icon"
+              aria-label="Previous screenshot"
+              className="absolute left-4 size-12 text-white hover:opacity-70 hover:bg-transparent"
             >
-              &#8249;
+              <ChevronLeft aria-hidden="true" className="size-8" />
             </Button>
           )}
 
@@ -238,7 +240,7 @@ export default function UserScreenshots() {
               {formatTime(currentModalGroup.timestampUTC, viewerTimezone)}
               {currentModalGroup.screenCount > 1 && (
                 <span style={{ color: 'rgba(255,255,255,0.6)' }}>
-                  {' '}&bull; Screen {currentModalScreen.screenIndex + 1} of {currentModalGroup.screenCount}
+                  {' '}· Screen {currentModalScreen.screenIndex + 1} of {currentModalGroup.screenCount}
                 </span>
               )}
             </p>
@@ -253,9 +255,11 @@ export default function UserScreenshots() {
                 setModalPos([next.groupIndex, next.screenIndex]);
               }}
               variant="ghost"
-              className="absolute right-4 text-white text-5xl leading-none hover:opacity-70 hover:bg-transparent"
+              size="icon"
+              aria-label="Next screenshot"
+              className="absolute right-4 size-12 text-white hover:opacity-70 hover:bg-transparent"
             >
-              &#8250;
+              <ChevronRight aria-hidden="true" className="size-8" />
             </Button>
           )}
         </div>

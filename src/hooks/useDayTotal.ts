@@ -11,7 +11,7 @@ import { safeTimezone } from '@/lib/utils/timezone';
  * device's local buffers.
  *
  * Counts: working + break seconds. This MUST match the "Total worked" figure in
- * TodayTimeline (working + break) so the timer page's "TODAY" total and the
+ * the Today's sessions tab (working + break) so the timer page's "TODAY" total and the
  * timesheet below it always show the same value. Both sum
  * `todaySessionWorkedSeconds`, which is what keeps them from drifting.
  * Excludes: idle and pause time.

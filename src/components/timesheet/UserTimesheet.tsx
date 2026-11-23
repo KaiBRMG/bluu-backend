@@ -7,6 +7,8 @@ import TimesheetView from './TimesheetView';
 import { ChevronDownIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { SURFACE } from '@/lib/surfaces';
+import { cn } from '@/lib/utils';
 
 function toDateString(date: Date): string {
   const y = date.getFullYear();
@@ -40,21 +42,15 @@ export default function UserTimesheet() {
   const { entries, timezone, loading, error } = useTimesheetData(null, startDate, endDate, userTimezone);
 
   return (
-    <div
-      className="rounded-lg p-6"
-      style={{
-        background: 'var(--container-background)',
-        border: '1px solid var(--border-subtle)',
-      }}
-    >
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-semibold tracking-tight">
-          Timesheets
-        </h2>
+    <div className={cn('rounded-xl p-6', SURFACE)}>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-zinc-400">
+          The seven days up to the date you pick. Today is on the Today&apos;s sessions tab.
+        </p>
         <div className="flex items-center gap-2">
           <Popover open={dateOpen} onOpenChange={setDateOpen}>
             <PopoverTrigger asChild>
-              <button type="button" className="form-input text-sm flex items-center justify-between gap-2" style={{ cursor: 'pointer' }}>
+              <button type="button" aria-label={`Week ending ${selectedDate}`} className="form-input text-sm flex items-center justify-between gap-2 tabular-nums" style={{ cursor: 'pointer' }}>
                 {selectedDate}
                 <ChevronDownIcon style={{ width: '14px', height: '14px', flexShrink: 0 }} />
               </button>

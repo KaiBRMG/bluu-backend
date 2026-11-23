@@ -235,7 +235,6 @@ export function ShiftCalendar({
   const { shifts, loading, error, refetch } = useShiftCalendar(months);
   const {
     offers,
-    lateClaimFrom,
     setClaim,
     loading: offersLoading,
     // Both hooks below build a real error message and both used to have it
@@ -678,7 +677,6 @@ export function ShiftCalendar({
                         offers={cell.offers}
                         formatTime={formatTime}
                         now={now}
-                        lateClaimFrom={lateClaimFrom}
                         onClaim={setClaim}
                       />
                     </div>
@@ -774,7 +772,6 @@ export function ShiftCalendar({
                           offers={cell.offers}
                           formatTime={formatTime}
                           now={now}
-                          lateClaimFrom={lateClaimFrom}
                           onClaim={setClaim}
                         />
                       </div>
@@ -1318,21 +1315,18 @@ function OfferCell({
   offers,
   formatTime,
   now,
-  lateClaimFrom,
   onClaim,
 }: {
   day: string;
   offers: CoverageOfferRow[];
   formatTime: (ms: number) => string;
-  /** Tells an upcoming window from one that has already happened. */
-  now: number;
   /**
-   * Cover that already happened stays claimable until payroll closes on it
-   * (2026-11-17) — agents forget, and an admin can still assign it late. This is
-   * the server's boundary for this agent; on or after it an ended offer reads
-   * "Claim", before it "Closed". The claim route makes the exact check.
+   * Tells an upcoming window from one that has already happened. Cover that
+   * already happened stays claimable until payroll closes on its month
+   * (2026-11-17); the server drops it from the board after that, so every
+   * offer that reaches this cell can still be claimed.
    */
-  lateClaimFrom: string | null;
+  now: number;
   onClaim: (offerId: string, claimed: boolean) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -1393,7 +1387,6 @@ function OfferCell({
         <ul className="max-h-72 divide-y divide-white/[0.07] overflow-y-auto">
           {offers.map(offer => {
             const ended = offer.windowEnd <= now;
-            const closed = ended && (lateClaimFrom === null || offer.day < lateClaimFrom);
             return (
               <li key={offer.offerId} className="px-3 py-2.5">
                 <div className="flex items-start justify-between gap-2">
@@ -1404,7 +1397,7 @@ function OfferCell({
                     </p>
                     {/* Said in words, not only by the button: "Claim" on a day that
                         has passed reads like a bug unless the cell says why. */}
-                    {ended && !closed && (
+                    {ended && (
                       <p className="mt-0.5 text-xs text-orange-400">
                         {offer.myClaim ? 'Already happened · waiting for an admin' : 'Already happened · still claimable'}
                       </p>
@@ -1423,7 +1416,7 @@ function OfferCell({
                   <Button
                     size="xs"
                     variant={offer.myClaim ? 'outline' : 'default'}
-                    disabled={busy === offer.offerId || (!offer.myClaim && closed)}
+                    disabled={busy === offer.offerId}
                     onClick={() => void toggle(offer)}
                     className={cn(
                       'shrink-0',
@@ -1436,8 +1429,6 @@ function OfferCell({
                         <Check aria-hidden />
                         In
                       </>
-                    ) : closed ? (
-                      'Closed'
                     ) : (
                       'Claim'
                     )}

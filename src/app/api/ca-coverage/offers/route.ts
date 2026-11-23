@@ -15,12 +15,20 @@
  * roster read per claimant, and the agent calendar — which admins also open —
  * renders none of it (rule 9i).
  *
- * `lateClaimFrom` is the earliest day on which the **caller** can still claim
- * cover whose window has ended (see `lateCoverFloorDay`): the first of last
- * month until they are finalised for it, then the first of this month. The
- * calendar renders "Claim" or "Closed" for an ended offer from it; the claim
- * route makes the exact check. Costs one snapshot read, and only when the
- * requested range reaches into the past.
+ * **Finalised months are excluded.** An offer whose window has ended stays on
+ * the board until payroll closes on its month, then it is dropped from the
+ * response — it can no longer be claimed, assigned or unassigned, so it is not
+ * a decision for anyone. The floor depends on who is reading:
+ *
+ * - **Coverage → To assign** (`detail=claimants`, admin): the first day of the
+ *   roster-wide payroll month (`resolvePayrollMonth`) — last month while any
+ *   agent still has it open, otherwise this month.
+ * - **Everyone else** (the agent calendar): the caller's own floor
+ *   (`lateCoverFloorDay`) — last month until *they* are finalised for it.
+ *
+ * Upcoming offers are never filtered. The floor is only read when the requested
+ * range reaches into the past. The claim and assign routes still make the exact
+ * per-agent check (`lateCoverRefusal`), because the admin floor is roster-wide.
  *
  * Admins also get `withdrawals` — absences that were cancelled after approval.
  * Those offers are *deleted* rather than left as history (the occurrence has to
@@ -32,6 +40,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/middleware/withAuth';
 import { handleApiError, checkPageAccess } from '@/lib/middleware/apiHelpers';
 import { getOffers, getClaimantLoads, lateCoverFloorDay } from '@/lib/services/caCoverageService';
+import { resolvePayrollMonth } from '@/lib/services/caSalaryService';
 import { getRecentLeaveWithdrawals } from '@/lib/services/coverageNotices';
 import { isDayKey, currentDayKey, addDays } from '@/lib/salary/salaryDate';
 import { getUserById } from '@/lib/services/userService';
@@ -58,11 +67,25 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
     }
 
     const isAdmin = (await checkPageAccess(token.uid, 'ca-admin')) === null;
-    const offers = await getOffers({
-      fromDay: from,
-      toDay: to,
-      status: (status as 'available' | 'assigned' | 'cancelled' | null) ?? undefined,
-    });
+    const today = currentDayKey();
+    const [fetched, floor] = await Promise.all([
+      getOffers({
+        fromDay: from,
+        toDay: to,
+        status: (status as 'available' | 'assigned' | 'cancelled' | null) ?? undefined,
+      }),
+      // Only a range reaching into the past can contain a finalised month.
+      from >= today
+        ? Promise.resolve(today)
+        : isAdmin && withClaimantDetail
+          ? resolvePayrollMonth().then(month => `${month}-01`)
+          : lateCoverFloorDay(token.uid),
+    ]);
+
+    // Drop ended offers from finalised months before anything else is read for
+    // them — names and claimant loads cost reads (rule 9) and wire (rule 9i).
+    const now = Date.now();
+    const offers = fetched.filter(o => o.windowEnd > now || o.day >= floor);
 
     // Resolve the names an agent needs to make sense of a row: whose absence
     // created it, and who ended up covering. One batched read for the whole
@@ -110,11 +133,7 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       }
     }
 
-    const today = currentDayKey();
-    const [caller, lateClaimFrom] = await Promise.all([
-      getUserById(token.uid),
-      from < today ? lateCoverFloorDay(token.uid) : Promise.resolve(today),
-    ]);
+    const caller = await getUserById(token.uid);
 
     return NextResponse.json({
       offers: rows,
@@ -123,7 +142,6 @@ export const GET = withAuth(async (request: NextRequest, token: DecodedIdToken) 
       // taken back, which is roster information rather than board information.
       withdrawals: isAdmin ? await getRecentLeaveWithdrawals(10) : [],
       timezone: safeTimezone(caller?.timezone),
-      lateClaimFrom,
     });
   } catch (err) {
     return handleApiError(err, 'ca-coverage/offers GET');

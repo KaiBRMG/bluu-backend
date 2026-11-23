@@ -53,7 +53,7 @@ export function invalidateTimesheetCache(uid: string): void {
  * The sessionStorage cache is only written once a response lands, so two
  * components mounting together and asking for the SAME range both miss it and
  * both query Firestore. The timer page does exactly that — `useDayTotal` and
- * `TodayTimeline` each pull today's ledger via `useTodaySessions`. Sharing the
+ * `useTodayModel` each pull today's ledger via `useTodaySessions`. Sharing the
  * promise makes it one query instead of two (cross-cutting rule 9).
  */
 const inFlight = new Map<string, Promise<CachedTimesheetData>>();

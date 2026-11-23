@@ -16,6 +16,7 @@
  */
 
 import { safeTimezone } from './utils/timezone';
+import { mergeShiftSpans } from './shiftSpans';
 
 export interface ShiftBreakPolicy {
   restrictBreaksAtShiftEdges: boolean;
@@ -59,19 +60,8 @@ export function computeBreakBlockWindows(
   spans: Array<{ start: number; end: number }>,
   edgeMs: number = SHIFT_EDGE_NO_BREAK_MS,
 ): BreakBlockWindow[] {
-  const sorted = spans
-    .filter(s => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
-    .sort((a, b) => a.start - b.start);
-
-  const merged: Array<{ start: number; end: number }> = [];
-  for (const s of sorted) {
-    const last = merged.at(-1);
-    if (last && s.start <= last.end) last.end = Math.max(last.end, s.end);
-    else merged.push({ ...s });
-  }
-
   const windows: BreakBlockWindow[] = [];
-  for (const { start, end } of merged) {
+  for (const { start, end } of mergeShiftSpans(spans)) {
     // A shift shorter than two edges is closed to breaks end to end.
     windows.push({ start, end: Math.min(start + edgeMs, end), reason: 'shift-start' });
     windows.push({ start: Math.max(end - edgeMs, start), end, reason: 'shift-end' });
