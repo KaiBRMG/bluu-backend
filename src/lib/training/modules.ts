@@ -258,7 +258,7 @@ const T1: TestDef = {
   id: 'T1',
   title: 'ID Only',
   kind: 'edit',
-  durationMs: 30 * MINUTE,
+  durationMs: 40 * MINUTE,
   budgetUsd: 1.5,
   deliverables: '4 identity swapped images',
   datasetLine: 'JOE',
@@ -275,8 +275,8 @@ const T1: TestDef = {
       {
         heading: 'Budget and Time',
         body: [
-          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 30 minutes to complete the task.',
-          'The 30 minutes includes reviewing your dataset and source images, generating results, checking your work, and organising your submission.',
+          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 40 minutes to complete the task.',
+          'The 40 minutes includes reviewing your dataset and source images, generating results, checking your work, and organising your submission.',
           'We are looking for high-quality results with low credit spend. The $1.50 is a maximum allowance, not a spending target. Record your total spend and number of attempts, including unsuccessful generations.',
         ],
       },
@@ -312,7 +312,7 @@ const T2: TestDef = {
   id: 'T2',
   title: 'ID + Body',
   kind: 'edit',
-  durationMs: 40 * MINUTE,
+  durationMs: 50 * MINUTE,
   budgetUsd: 1.5,
   deliverables: '4 final images',
   datasetLine: 'Mixed, assigned below',
@@ -355,8 +355,8 @@ const T2: TestDef = {
       {
         heading: 'Budget and Time',
         body: [
-          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 40 minutes to complete the task.',
-          'The 40 minutes includes reviewing your datasets and source images, generating results, checking your work, and organising your submission.',
+          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 50 minutes to complete the task.',
+          'The 50 minutes includes reviewing your datasets and source images, generating results, checking your work, and organising your submission.',
           'We are looking for high-quality results with low credit spend. The $1.50 is a maximum allowance, not a spending target. Record your total spend and number of attempts, including unsuccessful generations.',
         ],
       },
@@ -391,7 +391,7 @@ const T3: TestDef = {
   id: 'T3',
   title: 'ID + Body + Background Change',
   kind: 'edit',
-  durationMs: 40 * MINUTE,
+  durationMs: 50 * MINUTE,
   budgetUsd: 1.5,
   deliverables: 'Four final images',
   datasetLine: 'Mixed, assigned below',
@@ -451,8 +451,8 @@ const T3: TestDef = {
       {
         heading: 'Budget and Time',
         body: [
-          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 40 minutes to complete the task.',
-          'The 40 minutes includes reviewing the supplied materials, choosing suitable replacement settings, generating results, checking your work, and organising your submission.',
+          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 50 minutes to complete the task.',
+          'The 50 minutes includes reviewing the supplied materials, choosing suitable replacement settings, generating results, checking your work, and organising your submission.',
           'We are looking for high-quality results with low credit spend. The $1.50 is a maximum allowance, not a spending target. Record your total spend and number of attempts, including unsuccessful generations.',
         ],
       },
@@ -482,7 +482,7 @@ const T4: TestDef = {
   id: 'T4',
   title: 'ID + Body + Pose Change',
   kind: 'edit',
-  durationMs: 40 * MINUTE,
+  durationMs: 50 * MINUTE,
   budgetUsd: 1.5,
   deliverables: 'Four final images',
   datasetLine: 'You will choose for each image',
@@ -519,8 +519,8 @@ const T4: TestDef = {
       {
         heading: 'Budget and Time',
         body: [
-          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 40 minutes to complete the task.',
-          'The 40 minutes includes reviewing the images and references, choosing a dataset and a new pose for each image, generating results, checking your work, and organising your submission.',
+          'You will have a $1.50 WaveSpeed spending limit for all four images, including retries and corrections, and 50 minutes to complete the task.',
+          'The 50 minutes includes reviewing the images and references, choosing a dataset and a new pose for each image, generating results, checking your work, and organising your submission.',
           'We are looking for high-quality generations with low credit spend. The allowance is a maximum, not a spending target.',
         ],
       },
@@ -551,7 +551,7 @@ const T5: TestDef = {
   id: 'T5',
   title: 'Corrections',
   kind: 'edit',
-  durationMs: 50 * MINUTE,
+  durationMs: 60 * MINUTE,
   budgetUsd: 2,
   deliverables: 'Five corrected images.',
   datasetLine: 'Use the identity dataset assigned to each image, if and when applicable.',
@@ -607,7 +607,7 @@ const T5: TestDef = {
       {
         heading: 'Budget and Time',
         body: [
-          'You will have 50 minutes and a $2 WaveSpeed spending limit for all five images, including retries and corrections.',
+          'You will have 60 minutes and a $2 WaveSpeed spending limit for all five images, including retries and corrections.',
           'The time includes reference review, editing, quality checks, and organising your submission.',
           'We are looking for high-quality corrections with low credit spend. The allowance is a maximum, not a spending target.',
         ],
@@ -638,7 +638,7 @@ const T6: TestDef = {
   id: 'T6',
   title: 'Original Image Generation',
   kind: 'generate',
-  durationMs: 90 * MINUTE,
+  durationMs: 100 * MINUTE,
   budgetUsd: 5,
   deliverables: '12 final images',
   datasetLine: 'Each dataset',
@@ -708,7 +708,7 @@ const T6: TestDef = {
       {
         heading: 'Budget and Time',
         body: [
-          'The 90 minutes includes reviewing references, planning, generating, checking, and organising all 12 images.',
+          'The 100 minutes includes reviewing references, planning, generating, checking, and organising all 12 images.',
           'The budget will be $5 covers all generations, retries, and corrections. It is a maximum allowance, not a spending target. Record your attempts and spending.',
         ],
       },

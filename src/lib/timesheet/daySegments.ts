@@ -10,7 +10,7 @@
  */
 
 import { STATE_CONFIG } from '@/lib/stateColors';
-import { todaySessionCloseMs, type TodaySession } from '@/hooks/useTodaySessions';
+import type { TodaySession } from '@/hooks/useTodaySessions';
 import type { SessionEvent } from '@/types/firestore';
 
 export type SegmentKind = 'working' | 'idle' | 'break' | 'pause' | 'not-counted';
@@ -110,15 +110,17 @@ export function buildSegments(events: SessionEvent[], closeMs: number): Segment[
  * Segments for one of today's sessions. An empty event log is *unknown*, not
  * "worked the whole span" (time-tracking.md, analytics trap 1), so it draws
  * nothing — except a manual entry, whose stored span IS the worked time (trap 7).
+ * `closeMs` is `todaySessionCloseMs(session, now)` — passed in so this module
+ * stays free of client hooks (and testable under Jest).
  */
-export function sessionSegments(session: TodaySession, nowMs: number): Segment[] {
+export function sessionSegments(session: TodaySession, closeMs: number): Segment[] {
   if (session.events.length === 0) {
     if (session.isManual && session.endTime !== null) {
       return [{ kind: 'working', startMs: session.startTime, endMs: session.endTime }];
     }
     return [];
   }
-  return buildSegments(session.events, todaySessionCloseMs(session, nowMs));
+  return buildSegments(session.events, closeMs);
 }
 
 /** Seconds per kind across a set of segments. */

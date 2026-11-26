@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useTodaySessions, type TodaySession } from '@/hooks/useTodaySessions';
+import { todaySessionCloseMs, useTodaySessions, type TodaySession } from '@/hooks/useTodaySessions';
 import { useMyShift } from '@/hooks/useMyShift';
 import { pickTodayShift, type ShiftSpan } from '@/lib/shiftSpans';
 import { getDayBoundsUTC, todayStr } from '@/lib/utils/timezone';
@@ -57,7 +57,7 @@ export function useTodayModel(timezone: string): TodayModel {
       if (s.isLive) for (const ev of s.events) if (ev.timestamp > now) now = ev.timestamp;
     }
     const sessionModels = sessions
-      .map(session => ({ session, segments: sessionSegments(session, now) }))
+      .map(session => ({ session, segments: sessionSegments(session, todaySessionCloseMs(session, now)) }))
       .sort((a, b) => a.session.startTime - b.session.startTime);
     const segments = sessionModels.flatMap(s => s.segments);
 
